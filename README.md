@@ -1,4 +1,4 @@
-# CS326 Group 2 Collaborative Robotics Project (Winter 2022-23)
+# CS326 Group 5 Collaborative Robotics Project (Winter 2022-23)
 
 ## Getting Started and Dependencies
 
