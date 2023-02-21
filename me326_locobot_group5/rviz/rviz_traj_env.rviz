@@ -7,6 +7,8 @@ Panels:
         - /Global Options1
         - /Status1
         - /TF1/Frames1
+        - /Path1
+        - /Path2
         - /Odometry1
       Splitter Ratio: 0.48819562792778015
     Tree Height: 1482
@@ -229,6 +231,30 @@ Visualization Manager:
       Topic: /locobot/mobile_base/path_visual
       Unreliable: false
       Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 255; 0; 255
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /locobot/mobile_base/traj_visual
+      Unreliable: false
+      Value: true
     - Angle Tolerance: 0.10000000149011612
       Class: rviz/Odometry
       Covariance:
@@ -246,7 +272,7 @@ Visualization Manager:
           Scale: 1
           Value: true
         Value: false
-      Enabled: true
+      Enabled: false
       Keep: 1
       Name: Odometry
       Position Tolerance: 0.10000000149011612
@@ -263,7 +289,7 @@ Visualization Manager:
         Value: Arrow
       Topic: /locobot/mobile_base/odom
       Unreliable: false
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -292,7 +318,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 11.275190353393555
+      Distance: 7.960237979888916
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -308,9 +334,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5697963237762451
+      Pitch: 1.4997963905334473
       Target Frame: <Fixed Frame>
-      Yaw: 2.405397415161133
+      Yaw: 3.1753971576690674
     Saved: ~
 Window Geometry:
   Displays:

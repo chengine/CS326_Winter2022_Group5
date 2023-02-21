@@ -1,9 +1,10 @@
 <?xml version="1.0" ?>
 <launch>
 
-  <!-- Now run the node for going from point A to B -->
+  <arg name="robot_name" default="sim_robot"/>
+  <param name="robot_name" value="$(arg robot_name)"/>
+  <rosparam file="$(find me326_locobot_group5)/param/robots/$(arg robot_name).yaml" command="load"/>
+  
   <node type="locobot_follow_trajectory.py" name="locobot_follow_trajectory" pkg="me326_locobot_group5" respawn="true" output="screen"/>
 
 </launch>
-
-

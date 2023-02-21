@@ -15,11 +15,11 @@
     refresh_tracker_frequency: 1.0
     </rosparam>
     <!-- ARMLab rigidbody Remap -->
-    <remap from="/vrpn_client_node/locobot_1/pose"
+    <!-- <remap from="/vrpn_client_node/locobot_1/pose"
     to="camera_frame/mavros/vision_pose/pose" />
     <remap from="/vrpn_client_node/locobot_2/pose"
     to="camera_frame/mavros/vision_pose/pose" />
     <remap from="/vrpn_client_node/locobot_3/pose"
-    to="camera_frame/mavros/vision_pose/pose" />
+    to="camera_frame/mavros/vision_pose/pose" /> -->
     </node>
 </launch>
