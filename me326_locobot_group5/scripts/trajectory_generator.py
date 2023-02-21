@@ -92,7 +92,7 @@ def rescale(s, V, om, V_max, a_max, om_max):
         elif abs(Vi) > 1e-6:
             tau[i] = tau[i-1] + ds/Vi
         else:
-            raise ValueError('zero velocity at i = ' + i)
+            raise ValueError('zero velocity at i = ' + str(i))
 
     return V_tilde, om_tilde, tau
 
