@@ -34,6 +34,7 @@ class LocobotFollowTrajectory(object):
     
     def __init__(self):
 
+        # ros params
         self.robot_name = rospy.get_param('/robot_name')
         self.robot_type = rospy.get_param('/robot_type')
         self.frame_offset = {
@@ -41,39 +42,19 @@ class LocobotFollowTrajectory(object):
             'y' : rospy.get_param('/frame_offset/y'),
             'theta' : rospy.get_param('/frame_offset/theta')
         }
+        
+        # publishers and messages
 
-        self.mobile_base_vel_publisher = rospy.Publisher("/locobot/mobile_base/commands/velocity", Twist, queue_size=1) #this is the topic we will publish to in order to move the base
-
-        self.target_pose = Pose()
+        self.mobile_base_vel_publisher = rospy.Publisher("/locobot/mobile_base/commands/velocity", Twist, queue_size=1)
         self.target_pose_visual = rospy.Publisher("/locobot/mobile_base/target_pose_visual", Marker, queue_size=1)
 
-        # xy waypoints for curved path
-        # self.path = np.array([
-        #     [0, 0],
-        #     [1, 0],
-        #     [3, 2],
-        #     [5, -1],
-        # ]) / 2
-
-        # self.path = np.array([
-        #     [-0.4, 1.8],
-        #     [0, 1.8],
-        #     [0.5, 1.9],
-        #     [0.6, 1.9]
-        # ])
+        self.path_visual = rospy.Publisher('/locobot/mobile_base/path_visual', Path, queue_size=1)
+        self.traj_visual = rospy.Publisher('/locobot/mobile_base/traj_visual', Path, queue_size=1)
 
         if self.robot_type == "sim":
             self.frame_id = "locobot/odom"
         elif self.robot_type == "physical":
             self.frame_id = "map"
-
-        
-        self.path_visual = rospy.Publisher('/locobot/mobile_base/path_visual', Path, queue_size=1)
-        self.traj_visual = rospy.Publisher('/locobot/mobile_base/traj_visual', Path, queue_size=1)
-
-        self.abs_path_service = rospy.Service('/traj_follower/abs_path', FollowPath, self.follow_abs_path)
-        self.rel_path_service = rospy.Service('/traj_follower/rel_path', FollowPath, self.follow_rel_path)
-        self.turn_heading_service = rospy.Service('/traj_follower/turn_heading', TurnHeading, self.turn_heading)
 
         self.empty_path = Path(
             header=Header(frame_id=self.frame_id),
@@ -81,6 +62,23 @@ class LocobotFollowTrajectory(object):
 
         self.path_msg = self.empty_path
         self.traj_msg = self.empty_path
+
+        # services
+        self.abs_path_service = rospy.Service('/traj_follower/abs_path', FollowPath, self.follow_abs_path)
+        self.rel_path_service = rospy.Service('/traj_follower/rel_path', FollowPath, self.follow_rel_path)
+        self.turn_heading_service = rospy.Service('/traj_follower/turn_heading', TurnHeading, self.turn_heading)
+
+        # control limits
+        self.v_max = 0.3 # m/s
+        self.w_max = np.pi/4 # rad/s
+
+        # traj gen limits
+        self.v_lim = 0.1 # m/s
+        self.a_lim = 0.03 # m/s^2
+        self.w_lim = np.pi/8 # rad/s
+
+        # traj gen smoothing parameter
+        self.alpha = 0.5 
 
         # set up controllers
         self.ramsete = Ramsete(b=2.0, zeta=0.8)
@@ -92,43 +90,36 @@ class LocobotFollowTrajectory(object):
 
         # initialize measurements
         self.current_pose = Pose()
-        self.current_euler = np.zeros(3)
+        self.current_euler = np.zeros((3,))
         self.current_vel = Twist()
+        self.current_x = np.zeros((3,))
 
-        self.vel_error = 0
-        self.w_error = 0
-
-        self.controller = "ramsete"
-
-        self.last_v = 0
-        self.last_w = 0
+        # initialize state variables
+        
+        self.last_timestamp = rospy.Time.now()
 
         self.state = State.IDLE
+        self.controller = "ramsete"
 
-        self.t_init = rospy.Time.now()
+        self.t_final = 0
+        self.x_initial = np.zeros((3,))
+        self.x_final = np.zeros((3,))
+        self.theta_final = 0
+
+        self.x_goal = np.zeros((3,))
 
     def set_traj(self, path, final_heading=np.nan):
 
-        # control limits
-        self.v_max = 0.3 # m/s
-        self.w_max = np.pi/4 # rad/s
-
-        # traj gen limits
-        self.v_lim = 0.1 # m/s
-        self.a_lim = 0.03 # m/s^2
-        self.w_lim = np.pi/8 # rad/s
-
-        alpha = 0.5 # smoothing parameter
-
-        traj, traj_ts, = compute_smoothed_traj(path, self.v_lim, alpha, CTRL_DT)
+        traj, traj_ts, = compute_smoothed_traj(path, self.v_lim, self.alpha, CTRL_DT)
         traj_ts, v_goal, w_goal, traj = modify_traj_with_limits(traj, traj_ts, self.v_lim, self.a_lim, self.w_lim, CTRL_DT)
 
         self.traj = scipy.interpolate.interp1d(traj_ts, traj, axis=0, bounds_error=False, fill_value=(traj[0], traj[-1]))
         self.v_goal = scipy.interpolate.interp1d(traj_ts, v_goal, bounds_error=False, fill_value=0)
         self.w_goal = scipy.interpolate.interp1d(traj_ts, w_goal, bounds_error=False, fill_value=0)
+        
         self.t_final = traj_ts[-1]
+        self.x_initial = traj[0, 0:3]
         self.x_final = traj[-1, 0:3]
-        self.theta_initial = traj[0, 2]
         self.theta_final = traj[-1, 2] if np.isnan(final_heading) else final_heading
 
         self.path_msg = Path(
@@ -152,17 +143,18 @@ class LocobotFollowTrajectory(object):
     
     def follow_rel_path(self, req):
 
-        c, s = np.cos(self.current_euler[0]), np.sin(self.current_euler[0])
+        c, s = np.cos(self.current_x[2]), np.sin(self.current_x[2])
         R = np.array([[c,-s],[s,c]])
 
-        path = (R @ np.array([req.x, req.y])).T
+        path = (R @ np.array([req.x, req.y])).T + self.current_x[0:2]
         
-        self.set_traj(path, req.final_heading)
+        self.set_traj(path, self.current_x[2] + req.final_heading)
 
         return {}
 
     def turn_heading(self, req):
 
+        self.x_final = np.array([*self.current_x[0:2], req.heading])
         self.theta_final = req.heading
         self.transition_state(State.TURN_TO_FINISH)
 
@@ -183,13 +175,13 @@ class LocobotFollowTrajectory(object):
         marker.scale.z = 0.1 #arrow height
 
         # Set the marker pose
-        marker.pose.position.x = self.target_pose.position.x  # center of the sphere in base_link frame
-        marker.pose.position.y = self.target_pose.position.y
-        marker.pose.position.z = self.target_pose.position.z
-        marker.pose.orientation.x = self.target_pose.orientation.x
-        marker.pose.orientation.y = self.target_pose.orientation.y
-        marker.pose.orientation.z = self.target_pose.orientation.z
-        marker.pose.orientation.w = self.target_pose.orientation.w
+        marker.pose.position.x, marker.pose.position.y, marker.pose.position.z = (*self.x_goal[0:2], 0)
+        (
+            marker.pose.orientation.x,
+            marker.pose.orientation.y,
+            marker.pose.orientation.z,
+            marker.pose.orientation.w,
+        ) = R.from_euler('ZYX', [self.x_goal[2], 0, 0]).as_quat()
 
         # Set the marker color
         marker.color.a = 1.0 #transparency
@@ -213,6 +205,8 @@ class LocobotFollowTrajectory(object):
                 data.pose.pose.orientation.w,
             ]).as_euler('ZYX')
 
+            self.current_x = np.array([self.current_pose.position.x, self.current_pose.position.y, self.current_euler[0]])
+
         self.current_vel = data.twist.twist
 
     def mocap_callback(self, data):
@@ -230,6 +224,8 @@ class LocobotFollowTrajectory(object):
         self.current_pose.position.x += self.frame_offset['x'] * np.cos(self.current_euler[0])
         self.current_pose.position.y += self.frame_offset['y'] * np.sin(self.current_euler[0])
 
+        self.current_x = np.array([self.current_pose.position.x, self.current_pose.position.y, self.current_euler[0]])
+
     def check_state_transitions(self, x, t):
 
         new_state = self.state
@@ -237,16 +233,16 @@ class LocobotFollowTrajectory(object):
         if self.state == State.IDLE:
             pass
         elif self.state == State.TURN_TO_START:
-            if abs(self.theta-x[2]) < self.at_heading_thresh:
+            if abs(self.x_goal[2]-x[2]) < self.at_heading_thresh:
                 new_state = State.FOLLOW_TRAJ
         elif self.state == State.FOLLOW_TRAJ:
             if np.linalg.norm(self.x_final[0:2]-x[0:2]) < self.traj_complete_thresh or t > self.t_final:
                 new_state = State.GO_TO_POSE
         elif self.state == State.GO_TO_POSE:
-            if np.linalg.norm(self.x_final[0:2]-x[0:2]) < self.at_pose_thresh:
+            if np.linalg.norm(self.x_goal[0:2]-x[0:2]) < self.at_pose_thresh:
                 new_state = State.TURN_TO_FINISH
         elif self.state == State.TURN_TO_FINISH:
-            if abs(self.theta-x[2]) < self.at_heading_thresh:
+            if abs(self.x_goal[2]-x[2]) < self.at_heading_thresh:
                 new_state = State.IDLE
 
         return new_state
@@ -257,43 +253,33 @@ class LocobotFollowTrajectory(object):
             print("OLD_STATE:", self.state, "-> NEW_STATE:", new_state)
             self.state = new_state
             if self.state == State.IDLE:
-                self.controller = "none"
+                self.x_goal = self.current_x
                 self.path_msg = self.empty_path
                 self.traj_msg = self.empty_path
-                self.target_pose = self.current_pose
+                self.controller = "none"
             elif self.state == State.TURN_TO_START:
-                self.theta = self.theta_initial
+                self.x_goal = self.x_initial
                 self.controller = "heading"
             elif self.state == State.FOLLOW_TRAJ:
-                self.t_init = rospy.Time.now()
+                # self.x_goal is updated every cycle in controller
                 self.controller = "ramsete"
             elif self.state == State.GO_TO_POSE:
+                self.x_goal = self.x_final
                 self.controller = "pose"
             elif self.state == State.TURN_TO_FINISH:
-                self.theta = self.theta_final
+                self.x_goal = np.concatenate((self.x_final[0:2], np.atleast_1d(self.theta_final)))
                 self.controller = "heading"
+            self.last_timestamp = rospy.Time.now()
 
 
     def compute_control(self):
 
-        t = (rospy.Time.now()-self.t_init).to_sec()
+        # compute current time (since last state transition)
+        t = (rospy.Time.now()-self.last_timestamp).to_sec()
         print("time: ", t)
 
-        x_goal = self.traj(t)[0:3]
-        v_goal = self.v_goal(t)
-        w_goal = self.w_goal(t)
-
-        self.target_pose.position.x, self.target_pose.position.y = x_goal[0:2]
-        (
-            self.target_pose.orientation.x,
-            self.target_pose.orientation.y,
-            self.target_pose.orientation.z,
-            self.target_pose.orientation.w
-        ) = R.from_euler('ZYX', [x_goal[2], 0, 0]).as_quat()
-
-        x = [self.current_pose.position.x, self.current_pose.position.y, self.current_euler[0]]
-
-        self.pub_target_point_marker()
+        # copy x_current to local variable
+        x = self.current_x
 
         # check transition conditions
         new_state = self.check_state_transitions(x, t)
@@ -306,47 +292,54 @@ class LocobotFollowTrajectory(object):
 
         if self.controller == "ramsete":
 
-            v, w = self.ramsete.calculate(x_goal, v_goal, w_goal, x)
+            self.x_goal = self.traj(t)[0:3]
+            v_goal = self.v_goal(t)
+            w_goal = self.w_goal(t)
+            v, w = self.ramsete.calculate(self.x_goal, v_goal, w_goal, x)
+
             print('x: ', x)
-            print('x_goal: ', x_goal)
-            print('tracking_error: ', np.linalg.norm(x_goal[0:2]-x[0:2]))
+            print('x_goal: ', self.x_goal)
+            print('tracking_error: ', np.linalg.norm(self.x_goal[0:2]-x[0:2]))
+            print('v_goal: ', v_goal)
+            print('w_goal: ', w_goal)
 
         elif self.controller == "pose":
 
-            v, w = self.pose_controller.calculate(self.x_final, x)
+            v, w = self.pose_controller.calculate(self.x_goal, x)
+
             print('x: ', x)
-            print('x_goal: ', self.x_final)
-            print('pose_error: ', np.linalg.norm(self.x_final[0:2]-x[0:2]))
+            print('x_goal: ', self.x_goal)
+            print('pose_error: ', np.linalg.norm(self.x_goal[0:2]-x[0:2]))
 
         elif self.controller == "heading":
 
-            v, w = (0, self.heading_kP * ((self.theta - x[2] + np.pi) % (2*np.pi) - np.pi))
+            theta_goal = self.x_goal[2]
+            v, w = (0, self.heading_kP * ((theta_goal - x[2] + np.pi) % (2*np.pi) - np.pi))
+
             print('x: ', x)
-            print('x_goal: ', self.x_final)
-            print('pose_error: ', np.linalg.norm(self.x_final[0:2]-x[0:2]))
+            print('x_goal: ', self.x_goal)
+            print('pose_error: ', np.linalg.norm(self.x_goal[0:2]-x[0:2]))
             print('current heading: ', x[2])
-            print('goal heading: ', self.theta)
-            print('heading error: ', self.theta-x[2])
+            print('goal heading: ', theta_goal)
+            print('heading error: ', theta_goal-x[2])
 
         else:
 
             v, w = (0, 0)
 
-        print('v_goal: ', v_goal)
-        print('w_goal: ', w_goal)
-
         print('v_cmd: ', v)
         print('w_cmd: ', w)
         
         # build control message
-        
         control_msg = Twist()
         control_msg.linear.x = np.clip(v, -self.v_max, self.v_max)
         control_msg.angular.z = np.clip(w, -self.w_max, self.w_max)
         
         # publish control message
-        
         self.mobile_base_vel_publisher.publish(control_msg)
+
+        # publish target marker
+        self.pub_target_point_marker()
         
     def run(self):
         
@@ -371,7 +364,6 @@ class LocobotFollowTrajectory(object):
             rate.sleep()
 
 
-
 def main():
     rospy.init_node('locobot_follow_trajectory')
     cls_obj = LocobotFollowTrajectory()
@@ -384,6 +376,14 @@ def main():
         ]) / 2,
         final_heading = np.pi/2,
     )
+    # cls_obj.set_traj(
+    #     path = np.array([
+    #         [-0.4, 1.8],
+    #         [0, 1.8],
+    #         [0.5, 1.9],
+    #         [0.6, 1.9]
+    #     ]),
+    # )
     cls_obj.run()
 
 
