@@ -55,8 +55,13 @@ def rescale(s, V, om, V_max, a_max, om_max):
             differential flatness problem.
         om: vector of angular velocities of length T. Solution from the
             unconstrained, differential flatness problem.
+        V_max: maximum velocity
+        a_max: maximum acceleration
+        om_max: maximum angular velocity
     Output:
         V_tilde: Rescaled velocity that satisfies the control constraints.
+        om_tilde: Rescaled angular velocity that satisfies the constrol constraints.
+        tau: Rescaled timestamps computed from V_tilde.
     """
 
     # velocity to satisfy both V_max and om_max
@@ -195,8 +200,7 @@ def modify_traj_with_limits(traj, t, V_max, a_max, om_max, dt):
     V,om = compute_controls(traj=traj)
     s = compute_arc_length(V, t)
     V_tilde, om_tilde, tau = rescale(s, V, om, V_max, a_max, om_max)
-    s_f = State(traj[-1, 0], traj[-1, 1], V_tilde[-1], traj[-1, 2])
 
-    t_new, V_scaled, om_scaled, traj_scaled = interpolate_traj(traj, tau, V_tilde, om_tilde, dt, s_f)
+    t_new, V_scaled, om_scaled, traj_scaled = tau, V_tilde, om_tilde, traj
     
     return t_new, V_scaled, om_scaled, traj_scaled
