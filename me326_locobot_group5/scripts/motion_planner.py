@@ -10,6 +10,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 
 from me326_locobot_group5.srv import *
+from matplotlib import pyplot as plt
 
 import dijkstra3d
 
@@ -46,7 +47,7 @@ class MotionPlanner():
         self.current_x = np.zeros((3,))
 
         self.blocks = [
-            (0.5, 0.5, "g"),
+            (-1, 0.5, "g"),
             # (0.1, -0.3, "r"),
             # (0.5, 0,5, "b"),
             # (-0.1, -0.1, "y"),
@@ -60,15 +61,15 @@ class MotionPlanner():
     def pose_to_idx(self, x, y):
 
         return (
-            np.round((x-self.x_bounds[0])/(self.x_bounds[1]-self.x_bounds[0]) * self.grid_length).astype(np.int_).clip(0, self.grid_length),
-            np.round((y-self.y_bounds[0])/(self.y_bounds[1]-self.y_bounds[0]) * self.grid_length).astype(np.int_).clip(0, self.grid_length)
+            np.round((x-self.x_bounds[0])/(self.x_bounds[1]-self.x_bounds[0]) * (self.grid_length-1)).astype(np.int_).clip(0, self.grid_length-1),
+            np.round((y-self.y_bounds[0])/(self.y_bounds[1]-self.y_bounds[0]) * (self.grid_length-1)).astype(np.int_).clip(0, self.grid_length-1)
         )
     
     def idx_to_pose(self, x, y):
 
         return (
-            self.x_bounds[0] + np.array(x, dtype=np.float_) / self.grid_length * (self.x_bounds[1]-self.x_bounds[0]),
-            self.y_bounds[0] + np.array(y, dtype=np.float_) / self.grid_length * (self.y_bounds[1]-self.y_bounds[0])
+            self.x_bounds[0] + np.array(x, dtype=np.float_) / (self.grid_length-1) * (self.x_bounds[1]-self.x_bounds[0]),
+            self.y_bounds[0] + np.array(y, dtype=np.float_) / (self.grid_length-1) * (self.y_bounds[1]-self.y_bounds[0])
         )
 
     def locobot_odom_callback(self, data):
@@ -117,11 +118,12 @@ class MotionPlanner():
 
         nearest_block = min([b for b in self.blocks if b[2] in self.colors], key=lambda b: (self.current_x[0]-b[0])**2+(self.current_x[1]-b[1])**2)
 
-        path = dijkstra3d.dijkstra(field, self.pose_to_idx(*self.current_x[0:2]), self.pose_to_idx(nearest_block[0], nearest_block[1]), compass=True)
+        path = dijkstra3d.dijkstra(field, self.pose_to_idx(*self.current_x[0:2]), self.pose_to_idx(nearest_block[0], nearest_block[1]), compass=True, connectivity=8)
 
         path_x, path_y = self.idx_to_pose(path[:,0], path[:,1])
 
-        
+        plt.plot(path_x, path_y)
+        plt.show()
 
         print(path_x, path_y)
         

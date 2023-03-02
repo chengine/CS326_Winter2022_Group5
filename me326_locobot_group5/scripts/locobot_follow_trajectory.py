@@ -99,7 +99,7 @@ class LocobotFollowTrajectory(object):
         self.last_timestamp = rospy.Time.now()
 
         self.state = State.IDLE
-        self.controller = "ramsete"
+        self.controller = "none"
 
         self.t_final = 0
         self.x_initial = np.zeros((3,))
@@ -367,15 +367,15 @@ class LocobotFollowTrajectory(object):
 def main():
     rospy.init_node('locobot_follow_trajectory')
     cls_obj = LocobotFollowTrajectory()
-    cls_obj.set_traj(
-        path = np.array([
-            [0, 0],
-            [1, 0],
-            [3, 2],
-            [5, -1],
-        ]) / 2,
-        final_heading = np.pi/2,
-    )
+    # cls_obj.set_traj(
+    #     path = np.array([
+    #         [0, 0],
+    #         [1, 0],
+    #         [3, 2],
+    #         [5, -1],
+    #     ]) / 2,
+    #     final_heading = np.pi/2,
+    # )
     # cls_obj.set_traj(
     #     path = np.array([
     #         [-0.4, 1.8],

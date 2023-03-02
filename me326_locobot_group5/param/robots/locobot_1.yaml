@@ -1,5 +1,5 @@
 robot_type: physical
 frame_offset:
-  x: -0.035 # m
-  y: -0.035 # m
-  theta: 1.571 # radians
+  x: 0 #-0.035 # m
+  y: 0 #-0.035 # m
+  theta: 0 #1.571 # radians
