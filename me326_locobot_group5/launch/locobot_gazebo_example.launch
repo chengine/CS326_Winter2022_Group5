@@ -18,12 +18,12 @@
 
 
   <!-- run the saved rviz environment -->
-  <node type="rviz" name="rviz" pkg="rviz" args="-d $(find me326_locobot_group5)/rviz/rviz_example_env.rviz" />
+  <node type="rviz" name="rviz" pkg="rviz" args="-d $(find me326_locobot_example)/rviz/rviz_example_env.rviz" />
 
 
   <!-- Now run the node for going from point A to B -->
 <group if="$(arg run_point_A_B_demo)">
-  <node type="locobot_example_motion.py" name="locobot_example_motion" pkg="me326_locobot_group5" respawn="true" />
+  <node type="locobot_example_motion.py" name="locobot_example_motion" pkg="me326_locobot_example" respawn="true" />
 </group>
 
 </launch>

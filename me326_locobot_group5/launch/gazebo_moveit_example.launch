@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+<launch>
+
+<group ns="locobot">
+  <node type="detect_block_node.py" name="block_detector" pkg="me326_locobot_example" respawn="false" output="screen" />
+  <node type="arm_moveit.py" name="moveit_arm" pkg="me326_locobot_example" respawn="false" output="screen" />
+</group>
+
+</launch>
+
+

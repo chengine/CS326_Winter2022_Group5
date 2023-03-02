@@ -1,0 +1,197 @@
+import cv2
+import numpy as np
+import open3d as o3d
+import ros_numpy
+from perception.clustering import mask_grid
+
+from cv_bridge import CvBridge
+import rospy
+import tf
+
+import geometry_msgs
+from geometry_msgs.msg import Pose, PointStamped, PoseArray
+from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Point
+from nav_msgs.msg import Odometry
+from visualization_msgs.msg import Marker, MarkerArray
+
+import sensor_msgs.point_cloud2 as pc2
+from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import PointCloud2
+from sensor_msgs import point_cloud2
+from image_geometry import PinholeCameraModel
+
+
+from me326_locobot_example.srv import BlockDetector, BlockDetectorResponse
+
+
+class BlockDetectors(object):
+	"""docstring for BlockDetector"""
+	def __init__(self, block_transforms = "/locobot/blocks/tf", block_colors=['r', 'g', 'b', 'y']):
+		self.bridge = CvBridge()	
+	
+		self.block_tf_pub = rospy.Publisher(block_transforms, Pose, queue_size=1)
+
+		self.camera_cube_locator_markers_r = rospy.Publisher("/locobot/blocks/visual_r", MarkerArray, queue_size=1)
+		self.camera_cube_locator_markers_g = rospy.Publisher("/locobot/blocks/visual_g", MarkerArray, queue_size=1)
+		self.camera_cube_locator_markers_b = rospy.Publisher("/locobot/blocks/visual_b", MarkerArray, queue_size=1)
+		self.camera_cube_locator_markers_y = rospy.Publisher("/locobot/blocks/visual_y", MarkerArray, queue_size=1)
+
+		self.block_colors = block_colors
+
+		# self.image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
+		# self.block_generator = rospy.Subscriber("/locobot/camera/depth_registered/points", PointCloud2, self.calculate_tf)
+
+		self.block_poses = {
+			'r': MarkerArray(),
+			'g': MarkerArray(),
+			'b': MarkerArray(),
+			'y': MarkerArray()
+		}
+		# create a tf listener
+		self.listener = tf.TransformListener()
+		
+	def color_image_callback(self,color_msg):
+		#double check img
+		self.color_img = self.bridge.imgmsg_to_cv2(color_msg, "rgb8")
+
+	def camera_cube_locator_marker_gen(self, block_positions, color='r', header=None):
+		block_markers = MarkerArray()
+
+		marks = []
+		for ind, block_xyz in enumerate(block_positions):		
+			point_3d_geom_msg = PointStamped()
+			point_3d_geom_msg.header = header
+			point_3d_geom_msg.point.x = block_xyz[0]
+			point_3d_geom_msg.point.y = block_xyz[1]
+			point_3d_geom_msg.point.z = block_xyz[2]
+			rotated_points = self.listener.transformPoint('locobot/base_link', point_3d_geom_msg)
+
+			if abs(rotated_points.point.z) > 0.1 :
+				continue
+
+			#this is very simple because we are just putting the point P in the base_link frame (it is static in this frame)
+			marker = Marker()
+			marker.header.frame_id = "locobot/base_link"
+			marker.header.stamp = rospy.Time.now()
+			marker.id = ind
+			marker.type = Marker.SPHERE
+			# Set the marker scale
+			marker.scale.x = 0.05  # radius of the sphere
+			marker.scale.y = 0.05
+			marker.scale.z = 0.05
+
+			# Set the marker pose
+			marker.pose.position.x = rotated_points.point.x
+			marker.pose.position.y = rotated_points.point.y
+			marker.pose.position.z = rotated_points.point.z
+
+			# Set the marker color
+			marker.color.a = 1.0 #transparency
+			if color == 'r':
+				marker_color = (1.0, 0.0, 0.0)
+			elif color == 'g':
+				marker_color = (0.0, 1.0, 0.0)
+			elif color == 'b':
+				marker_color = (0.0, 0.0, 1.0)
+			else:
+				marker_color = (1.0, 1.0, 0.0)
+
+			marker.color.r = marker_color[0]
+			marker.color.g = marker_color[1]
+			marker.color.b = marker_color[2]
+			marks.append(marker)
+
+		# Publish the marker
+		block_markers.markers = marks
+		if color == 'r':
+			self.camera_cube_locator_markers_r.publish(block_markers)
+			self.block_poses['r'] = block_markers
+
+		if color == 'g':
+			self.camera_cube_locator_markers_g.publish(block_markers)
+			self.block_poses['g'] = block_markers
+
+		if color == 'b':
+			self.camera_cube_locator_markers_b.publish(block_markers)
+			self.block_poses['b'] = block_markers
+
+		else:
+			self.camera_cube_locator_markers_y.publish(block_markers)
+			self.block_poses['y'] = block_markers
+
+
+	def calculate_tf(self, data):
+		# Data is PointCloud2 msg
+
+		# Grab fields
+		header = data.header
+		pc=ros_numpy.numpify(data)
+		pc=ros_numpy.point_cloud2.split_rgb_field(pc)
+		shape = pc.shape + (3, )
+
+		# Coordinates
+		points = np.zeros(shape) 
+		points[..., 0] = pc['x']
+		points[..., 1] = pc['y']
+		points[..., 2] = pc['z']
+
+		# Colors
+		rgb = np.zeros(shape)
+
+		rgb[..., 0] = self.color_img[..., 0]
+		rgb[..., 1] = self.color_img[..., 1]
+		rgb[..., 2] = self.color_img[..., 2]
+
+		cluster_data = np.concatenate([points, rgb], axis=-1)
+		cluster_data = cluster_data.reshape((-1, 6))
+		cluster_data = cluster_data[~np.isnan(cluster_data).any(axis=-1)]
+		cluster_data = cluster_data.reshape((1, -1, 6))
+
+		# TODO: Seperate based on non-pertinent colors
+		for c in self.block_colors:
+			masked_img, masked_xyz = mask_grid(cluster_data[..., 3:].astype(np.uint8), cluster_data[..., :3], color_mask=c)
+			data = np.concatenate([masked_xyz, masked_img], axis=-1)
+			data[:, 3:] = data[:, 3:]/255.
+
+			pc = o3d.geometry.PointCloud()
+
+			pc.points = o3d.utility.Vector3dVector(data[:, :3])
+			pc.colors = o3d.utility.Vector3dVector(data[:, 3:])
+
+			pc_ind = np.array(pc.cluster_dbscan(.1, 5))
+			def partition(array):
+				return {i: (array == i).nonzero()[0] for i in np.unique(array)}
+			
+			pc_ind_dict = partition(pc_ind)
+			
+			block_centers = []
+			for key, value in pc_ind_dict.items():
+				if key != -1:
+					pc_new = pc.select_by_index(value)
+
+					# pc, indexes = pc.remove_statistical_outlier(10, .1)
+					BB = pc_new.get_oriented_bounding_box()
+
+					bounding_box_center = np.array(BB.center)
+
+					if bounding_box_center[-1] > 0.5: 	# Prevents finding spurious points
+						block_centers.append(bounding_box_center)
+			block_centers = np.array(block_centers)
+			self.camera_cube_locator_marker_gen(block_centers, color=c, header=header)
+		
+	def service_callback(self, req):
+		#this function takes in a requested topic for the image, and returns pixel point
+		#now call the other subscribers
+		self.image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
+		self.block_generator = rospy.Subscriber("/locobot/camera/depth_registered/points", PointCloud2, self.calculate_tf)
+
+		resp = BlockDetectorResponse()
+		# print('req', req.color.data)
+		# print('resp', self.block_poses[req.color.data])
+		print('r', self.block_poses['r'])
+		try: 
+			resp.block_poses = self.block_poses[req.color.data]
+			return resp
+		except:
+			print('No visible blocks')
