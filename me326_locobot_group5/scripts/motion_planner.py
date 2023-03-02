@@ -33,11 +33,11 @@ class MotionPlanner():
         self.abs_path_service = rospy.ServiceProxy('/traj_follower/abs_path', FollowPath)
 
         # parameters
-        self.x_bounds = [-1, 1]
-        self.y_bounds = [-1, 1]
+        self.x_bounds = [-2, 2]
+        self.y_bounds = [-2, 2]
         self.grid_length = 512
 
-        self.grid_x, self.grid_y = np.meshgrid((np.linspace(*self.x_bounds, self.grid_length), np.linspace(*self.y_bounds, self.grid_length)))
+        self.grid_x, self.grid_y = np.meshgrid(np.linspace(*self.x_bounds, self.grid_length), np.linspace(*self.y_bounds, self.grid_length))
 
         # initialize measurements
         self.current_pose = Pose()
@@ -46,13 +46,13 @@ class MotionPlanner():
         self.current_x = np.zeros((3,))
 
         self.blocks = [
-            (0.2, 0.2, "g"),
-            (0.1, -0.3, "r"),
-            (0.5, 0,5, "b"),
-            (-0.1, -0.1, "y"),
+            (0.5, 0.5, "g"),
+            # (0.1, -0.3, "r"),
+            # (0.5, 0,5, "b"),
+            # (-0.1, -0.1, "y"),
         ]
 
-        self.colors = ["g, r"]
+        self.colors = ["g", "r"]
 
         self.block_r = 0.03
         self.robot_r = 0.3
@@ -89,6 +89,8 @@ class MotionPlanner():
         self.current_vel = data.twist.twist
 
     def mocap_callback(self, data):
+
+        print("MOCAP CALLBACK")
         
         self.current_pose = data.pose
 
@@ -107,18 +109,24 @@ class MotionPlanner():
     
     def plan_motion(self):
 
-        field = np.ones((self.grid_size, self.grid_size), dtype=bool)
+        field = np.ones((self.grid_length, self.grid_length), dtype=bool)
 
-        for x,y,c in self.blocks:
+        # for x,y,c in self.blocks:
             
-            field = field & (((self.grid_x - x)**2 + (self.grid_y-y)**2) >= (self.block_r+self.robot_r)**2)
+        #     field = field & (((self.grid_x - x)**2 + (self.grid_y-y)**2) >= (self.block_r+self.robot_r)**2)
 
-        nearest_block = min([b for b in self.blocks if b[2] in self.colors], key=lambda b: (self.current_x[0]-x[0])**2+(self.current_x[1]-x[1])**2)
+        nearest_block = min([b for b in self.blocks if b[2] in self.colors], key=lambda b: (self.current_x[0]-b[0])**2+(self.current_x[1]-b[1])**2)
 
-        path = dijkstra3d.dijkstra(field=field, source=self.pose_to_idx(*self.current_x[0:2]), target=self.pose_to_idx(nearest_block[0], nearest_block[1]))
+        path = dijkstra3d.dijkstra(field, self.pose_to_idx(*self.current_x[0:2]), self.pose_to_idx(nearest_block[0], nearest_block[1]), compass=True)
 
-        self.abs_path_service(path[:,0], path[:,1], np.nan)
+        path_x, path_y = self.idx_to_pose(path[:,0], path[:,1])
+
         
+
+        print(path_x, path_y)
+        
+        self.abs_path_service(path_x.astype(np.float32), path_y.astype(np.float32), np.nan)
+
     def run(self):
         
         rospy.Subscriber("/locobot/mobile_base/odom", Odometry, self.locobot_odom_callback)
@@ -127,7 +135,7 @@ class MotionPlanner():
 
         rate = rospy.Rate(PLAN_HZ)
 
-        rate.sleep()
+        rospy.wait_for_message("/vrpn_client_node/" + self.robot_name + "/pose", PoseStamped)
         self.plan_motion()
         
 
