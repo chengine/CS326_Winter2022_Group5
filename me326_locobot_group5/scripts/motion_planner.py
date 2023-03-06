@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from enum import Enum
+
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
@@ -14,8 +16,19 @@ from matplotlib import pyplot as plt
 
 import dijkstra3d
 
+from localizer import Localizer
+
 PLAN_HZ = 1
 PLAN_DT = 1/PLAN_HZ
+
+class State(Enum):
+    IDLE = 0,
+    STARTUP = 1,
+    SCAN_FOR_BLOCKS = 2,
+    DRIVE_TO_BLOCK = 3,
+    GRAB_BLOCK = 4,
+    DRIVE_TO_GOAL = 5,
+    DROP_BLOCK = 6,
 
 class MotionPlanner():
     
@@ -41,10 +54,7 @@ class MotionPlanner():
         self.grid_x, self.grid_y = np.meshgrid(np.linspace(*self.x_bounds, self.grid_length), np.linspace(*self.y_bounds, self.grid_length))
 
         # initialize measurements
-        self.current_pose = Pose()
-        self.current_euler = np.zeros((3,))
-        self.current_vel = Twist()
-        self.current_x = np.zeros((3,))
+        self.localizer = Localizer()
 
         self.blocks = [
             (-1, 0.5, "g"),
@@ -72,42 +82,57 @@ class MotionPlanner():
             self.y_bounds[0] + np.array(y, dtype=np.float_) / (self.grid_length-1) * (self.y_bounds[1]-self.y_bounds[0])
         )
 
-    def locobot_odom_callback(self, data):
-        
-        if self.robot_type == "sim":
+    def check_state_transitions(self):
 
-            self.current_pose = data.pose.pose
+        new_state = self.state
 
-            self.current_euler = R.from_quat([
-                data.pose.pose.orientation.x,
-                data.pose.pose.orientation.y,
-                data.pose.pose.orientation.z,
-                data.pose.pose.orientation.w,
-            ]).as_euler('ZYX')
+        if self.state == State.IDLE:
+            pass
+        elif self.state == State.STARTUP:
+            if self.localizer.is_valid():
+                new_state = State.SCAN_FOR_BLOCKS
+        elif self.state == State.SCAN_FOR_BLOCKS:
+            if True: # if we have a nearest block
+                new_state = State.DRIVE_TO_BLOCK
+        elif self.state == State.DRIVE_TO_BLOCK:
+            if True: # if we are at the block
+                new_state = State.GRAB_BLOCK
+        elif self.state == State.GRAB_BLOCK:
+            if True: # if we have the block
+                new_state = State.DRIVE_TO_GOAL
+        elif self.state == State.DRIVE_TO_GOAL:
+            if True: # if we are at the goal
+                new_state = State.DROP_BLOCK
+        elif self.state == State.DROP_BLOCK:
+            if True: # if we have dropped the block
+                new_state = State.DRIVE_TO_BLOCK
 
-            self.current_x = np.array([self.current_pose.position.x, self.current_pose.position.y, self.current_euler[0]])
-
-        self.current_vel = data.twist.twist
-
-    def mocap_callback(self, data):
-
-        print("MOCAP CALLBACK")
-        
-        self.current_pose = data.pose
-
-        self.current_euler = R.from_quat([
-            data.pose.orientation.x,
-            data.pose.orientation.y,
-            data.pose.orientation.z,
-            data.pose.orientation.w,
-        ]).as_euler('ZYX')
-        
-        self.current_euler[0] += self.frame_offset['theta']
-        self.current_pose.position.x += self.frame_offset['x'] * np.cos(self.current_euler[0])
-        self.current_pose.position.y += self.frame_offset['y'] * np.sin(self.current_euler[0])
-
-        self.current_x = np.array([self.current_pose.position.x, self.current_pose.position.y, self.current_euler[0]])
+        return new_state
     
+    def transition_state(self, new_state):
+
+        if new_state != self.state:
+            print("OLD_STATE:", self.state, "-> NEW_STATE:", new_state)
+            self.state = new_state
+            if self.state == State.IDLE:
+                self.x_goal = self.current_x
+                self.path_msg = self.empty_path
+                self.traj_msg = self.empty_path
+                self.controller = "none"
+            elif self.state == State.TURN_TO_START:
+                self.x_goal = self.x_initial
+                self.controller = "heading"
+            elif self.state == State.FOLLOW_TRAJ:
+                # self.x_goal is updated every cycle in controller
+                self.controller = "ramsete"
+            elif self.state == State.GO_TO_POSE:
+                self.x_goal = self.x_final
+                self.controller = "pose"
+            elif self.state == State.TURN_TO_FINISH:
+                self.x_goal = np.concatenate((self.x_final[0:2], np.atleast_1d(self.theta_final)))
+                self.controller = "heading"
+            self.last_timestamp = rospy.Time.now()
+
     def plan_motion(self):
 
         field = np.ones((self.grid_length, self.grid_length), dtype=bool)
@@ -131,14 +156,13 @@ class MotionPlanner():
 
     def run(self):
         
-        rospy.Subscriber("/locobot/mobile_base/odom", Odometry, self.locobot_odom_callback)
-        if self.robot_type == "physical":
-            rospy.Subscriber("/vrpn_client_node/" + self.robot_name + "/pose", PoseStamped, self.mocap_callback)
+        self.localizer.run()
 
         rate = rospy.Rate(PLAN_HZ)
 
-        rospy.wait_for_message("/vrpn_client_node/" + self.robot_name + "/pose", PoseStamped)
-        self.plan_motion()
+        while not rospy.is_shutdown():
+            self.plan_motion()
+            rate.sleep()
         
 
 def main():

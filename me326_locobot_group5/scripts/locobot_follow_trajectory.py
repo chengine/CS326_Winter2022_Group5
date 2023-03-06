@@ -19,6 +19,7 @@ from me326_locobot_group5.srv import *
 from ramsete import Ramsete
 from pose_controller import PoseController
 from trajectory_generator import compute_smoothed_traj, modify_traj_with_limits
+from localizer import Localizer
 
 CTRL_HZ = 50
 CTRL_DT = 1/CTRL_HZ
@@ -88,11 +89,8 @@ class LocobotFollowTrajectory(object):
         self.at_pose_thresh = 0.05 # m
         self.at_heading_thresh = np.radians(2) # deg
 
-        # initialize measurements
-        self.current_pose = Pose()
-        self.current_euler = np.zeros((3,))
-        self.current_vel = Twist()
-        self.current_x = np.zeros((3,))
+        # initialize localizer
+        self.localizer = Localizer()
 
         # initialize state variables
         
@@ -143,18 +141,18 @@ class LocobotFollowTrajectory(object):
     
     def follow_rel_path(self, req):
 
-        c, s = np.cos(self.current_x[2]), np.sin(self.current_x[2])
+        c, s = np.cos(self.localizer.pose2d[2]), np.sin(self.localizer.pose2d[2])
         R = np.array([[c,-s],[s,c]])
 
-        path = (R @ np.array([req.x, req.y])).T + self.current_x[0:2]
+        path = (R @ np.array([req.x, req.y])).T + self.localizer.pose2d[0:2]
         
-        self.set_traj(path, self.current_x[2] + req.final_heading)
+        self.set_traj(path, self.localizer.pose2d[2] + req.final_heading)
 
         return {}
 
     def turn_heading(self, req):
 
-        self.x_final = np.array([*self.current_x[0:2], req.heading])
+        self.x_final = np.array([*self.localizer.pose2d[0:2], req.heading])
         self.theta_final = req.heading
         self.transition_state(State.TURN_TO_FINISH)
 
@@ -192,40 +190,6 @@ class LocobotFollowTrajectory(object):
         # Publish the marker
         self.target_pose_visual.publish(marker)
 
-    def locobot_odom_callback(self, data):
-        
-        if self.robot_type == "sim":
-
-            self.current_pose = data.pose.pose
-
-            self.current_euler = R.from_quat([
-                data.pose.pose.orientation.x,
-                data.pose.pose.orientation.y,
-                data.pose.pose.orientation.z,
-                data.pose.pose.orientation.w,
-            ]).as_euler('ZYX')
-
-            self.current_x = np.array([self.current_pose.position.x, self.current_pose.position.y, self.current_euler[0]])
-
-        self.current_vel = data.twist.twist
-
-    def mocap_callback(self, data):
-        
-        self.current_pose = data.pose
-
-        self.current_euler = R.from_quat([
-            data.pose.orientation.x,
-            data.pose.orientation.y,
-            data.pose.orientation.z,
-            data.pose.orientation.w,
-        ]).as_euler('ZYX')
-        
-        self.current_euler[0] += self.frame_offset['theta']
-        self.current_pose.position.x += self.frame_offset['x'] * np.cos(self.current_euler[0])
-        self.current_pose.position.y += self.frame_offset['y'] * np.sin(self.current_euler[0])
-
-        self.current_x = np.array([self.current_pose.position.x, self.current_pose.position.y, self.current_euler[0]])
-
     def check_state_transitions(self, x, t):
 
         new_state = self.state
@@ -253,7 +217,7 @@ class LocobotFollowTrajectory(object):
             print("OLD_STATE:", self.state, "-> NEW_STATE:", new_state)
             self.state = new_state
             if self.state == State.IDLE:
-                self.x_goal = self.current_x
+                self.x_goal = self.localizer.pose2d
                 self.path_msg = self.empty_path
                 self.traj_msg = self.empty_path
                 self.controller = "none"
@@ -278,8 +242,8 @@ class LocobotFollowTrajectory(object):
         t = (rospy.Time.now()-self.last_timestamp).to_sec()
         print("time: ", t)
 
-        # copy x_current to local variable
-        x = self.current_x
+        # copy localizer pose2d to local variable
+        x = self.localizer.pose2d
 
         # check transition conditions
         new_state = self.check_state_transitions(x, t)
@@ -343,9 +307,7 @@ class LocobotFollowTrajectory(object):
         
     def run(self):
         
-        rospy.Subscriber("/locobot/mobile_base/odom", Odometry, self.locobot_odom_callback)
-        if self.robot_type == "physical":
-            rospy.Subscriber("/vrpn_client_node/" + self.robot_name + "/pose", PoseStamped, self.mocap_callback)
+        self.localizer.run()
 
         rate = rospy.Rate(CTRL_HZ)
         counter = 0
