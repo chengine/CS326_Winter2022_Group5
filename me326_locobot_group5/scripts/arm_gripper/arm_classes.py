@@ -10,6 +10,7 @@ from geometry_msgs.msg import Pose, PointStamped
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker, MarkerArray
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 class MoveLocobotArm(object):
 	"""docstring for MoveLocobotArm"""
@@ -49,18 +50,31 @@ class MoveLocobotArm(object):
 		print("\n")
 		
 	def close_gripper(self):
-		gripper_goal = self.gripper_move_group.get_current_joint_values()
-		print("grippers",gripper_goal)
-		gripper_goal[0] = 0.037
-		gripper_goal[1] = -0.037
-		self.gripper_move_group.go(gripper_goal, wait=True)
+		# gripper_goal = self.gripper_move_group.get_current_joint_values()
+		# print("grippers",gripper_goal)
+		# gripper_goal[0] = 0.037
+		# gripper_goal[1] = -0.037
+
+		gripper_goal = self.gripper_move_group.get_named_target_values('Closed')
+		self.gripper_move_group.go(gripper_goal, wait=True)		
+		self.gripper_move_group.stop()
+
+		# msg = JointTrajectoryPoint()
+		# msg.positions = (0.037)
+		# full_msg = JointTrajectory()
+		# full_msg.points = [msg]
+		# joint_pub = rospy.Publisher("/locobot/gripper_controller/command", JointTrajectory, queue_size=1)
+		# joint_pub.publish(full_msg)
 
 	def open_gripper(self):
-		gripper_goal = self.gripper_move_group.get_current_joint_values()
-		print("grippers",gripper_goal)
-		gripper_goal[0] = -0.037
-		gripper_goal[1] = 0.037
-		self.gripper_move_group.go(gripper_goal, wait=True)
+		# gripper_goal = self.gripper_move_group.get_current_joint_values()
+		# print("grippers",gripper_goal)
+		# gripper_goal[0] = -0.037
+		# gripper_goal[1] = 0.037
+
+		gripper_goal = self.gripper_move_group.get_named_target_values('Open')
+		self.gripper_move_group.go(gripper_goal, wait=True)		
+		self.gripper_move_group.stop()
 
 	def move_arm_down_for_camera(self):
 		#start here
@@ -77,21 +91,36 @@ class MoveLocobotArm(object):
 		# parameters if you have already set the pose or joint target for the group
 		self.arm_move_group.go(joint_goal, wait=True)	
 
+	def move_arm_to_sleep(self):
+		self.arm_move_group.get_named_target_values('Sleep')
+		# now we call the planner to compute and execute the plan
+		plan = self.arm_move_group.go(wait=True)
+		# Calling `stop()` ensures that there is no residual movement
+		self.arm_move_group.stop()
+		# It is always good to clear your targets after planning with poses.
+		# Note: there is no equivalent function for clear_joint_value_targets()
+		self.arm_move_group.clear_pose_targets()
+
 	def move_gripper_down_to_grasp(self, position=(0.5, 0., 0.03)):
 		pose_goal = geometry_msgs.msg.Pose()
 
 		pose_goal.position.x = position[0]
 		pose_goal.position.y = position[1]
-		pose_goal.position.z = 0.03
+		pose_goal.position.z = 0.01
 
 		v = np.matrix([0,1,0]) #pitch about y-axis
-		th = 10*np.pi/180. #pitch by 45deg
+		th = 90*np.pi/180. #pitch by 45deg
 		#note that no rotation is th= 0 deg
 
 		pose_goal.orientation.x = v.item(0)*np.sin(th/2)
 		pose_goal.orientation.y = v.item(1)*np.sin(th/2)
 		pose_goal.orientation.z = v.item(2)*np.sin(th/2)
 		pose_goal.orientation.w = np.cos(th/2)
+
+		# pose_goal.orientation.x = 0.
+		# pose_goal.orientation.y = 0.
+		# pose_goal.orientation.z = 0.
+		# pose_goal.orientation.w = 1.
 
 		try:
 			# self.arm_move_group.set_position_target(position)

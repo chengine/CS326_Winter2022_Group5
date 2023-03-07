@@ -1,6 +1,6 @@
 <?xml version="1.0" ?>
 <launch>
-
+	
   <!-- this script spawns 4 cubes - blue, red, green and yellow, all approximately 1meter from the locobots origin position -->
 
   <!-- Spawn the Blue cube ~1 meter away from the locobot origin-->

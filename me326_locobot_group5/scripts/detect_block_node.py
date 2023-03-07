@@ -38,5 +38,24 @@ def block_detect_server():
 	print("Ready to detect blocks.")
 	rospy.spin()
 
+def detect_blocks_client(color):
+	rospy.wait_for_service('block_detector')
+	try:
+		detect_blocks = rospy.ServiceProxy('block_detector', BlockDetector)
+		resp = detect_blocks(color)
+
+		tnow = rospy.Time.now()
+
+		elapsed = 0
+
+		# TODO: Add a timeout here.
+		while len(resp.block_poses.markers) == 0 and elapsed < 3.:
+			resp = detect_blocks(color)
+			elapsed = (rospy.Time.now() - tnow).to_sec()
+		return resp
+	except rospy.ServiceException as e:
+		print("Service call failed: %s"%e)
+		return -1
+
 if __name__ == "__main__":
 	block_detect_server()

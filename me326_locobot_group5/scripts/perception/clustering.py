@@ -4,7 +4,24 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 import cv2
 
-def mask_grid(color_img, img_xyz, color_mask='r'):
+def projectPixelTo3d(camera, us, vs):
+    """
+    :param uv:        rectified pixel coordinates
+    :type uv:         (u, v)
+    Returns the unit vector which passes from the camera center to through rectified pixel (u, v),
+    using the camera :math:`P` matrix.
+    This is the inverse of :math:`project3dToPixel`.
+    """
+    x = (us - np.array(camera.cx())) / np.array(camera.fx())
+    y = (vs - np.array(camera.cy())) / np.array(camera.fy())
+    norm = np.sqrt(x*x + y*y + 1)
+    # x = x / norm
+    # y = y / norm
+    # z = 1.0 / norm
+    z = np.ones(x.shape)
+    return np.stack([x, y, z], axis=-1)
+
+def mask_grid(color_img, depth_img, meshgrid, camera, color_mask='r'):
     """Returns the black and white image with a color-mask for the specified color (white or the color where the color is, black everywhere else)
     
     Parameters
@@ -47,8 +64,19 @@ def mask_grid(color_img, img_xyz, color_mask='r'):
     # masked = cv2.bitwise_and(color_img, color_img, mask=mask)
     # mask_xyz = cv2.bitwise_and(img_xyz, img_xyz, mask=mask)
 
-    mask_img = color_img.squeeze()[mask]
-    mask_xyz = img_xyz.squeeze()[mask]
+    # Mask color
+    mask_img = color_img[mask]
+
+    # Mask depth
+    mask_uv = meshgrid[mask]
+    
+    rays = np.array(projectPixelTo3d(camera, mask_uv[:, 0], mask_uv[:, 1]))
+
+    mask_depth = depth_img.squeeze()[mask]
+
+    mask_xyz = mask_depth[..., None] * rays
+
+    # mask_xyz = depth_img[mask]
 
     return mask_img, mask_xyz
 
