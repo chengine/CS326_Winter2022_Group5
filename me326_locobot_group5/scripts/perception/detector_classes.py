@@ -1,18 +1,14 @@
-import cv2
+# import cv2
 import numpy as np
 import open3d as o3d
-import ros_numpy
+# import ros_numpy
 from perception.clustering import mask_grid
 
 from cv_bridge import CvBridge
 import rospy
 import tf
 
-import geometry_msgs
-from geometry_msgs.msg import Pose, PointStamped, PoseArray
-from geometry_msgs.msg import Twist
-from geometry_msgs.msg import Point
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Pose, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
 
 import sensor_msgs.point_cloud2 as pc2
@@ -20,9 +16,6 @@ from sensor_msgs.msg import Image, CameraInfo
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs import point_cloud2
 from image_geometry import PinholeCameraModel
-
-
-from me326_locobot_group5.srv import BlockDetector, BlockDetectorResponse
 
 
 class BlockDetectors(object):
@@ -39,12 +32,6 @@ class BlockDetectors(object):
 
 		self.block_colors = block_colors
 
-
-		self.info_sub = rospy.Subscriber('/locobot/camera/aligned_depth_to_color/camera_info', CameraInfo, self.info_callback)
-
-		# self.image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
-		# self.block_generator = rospy.Subscriber("/locobot/camera/depth_registered/points", PointCloud2, self.calculate_tf)
-
 		self.block_poses = {
 			'r': MarkerArray(),
 			'g': MarkerArray(),
@@ -53,6 +40,15 @@ class BlockDetectors(object):
 		}
 		# create a tf listener
 		self.listener = tf.TransformListener()
+
+		self.camera_model = None
+		self.color_img = None
+		self.depth_img = None
+		self.depth_header = None
+	
+	def ready(self):
+
+		return self.camera_model is not None and self.color_img is not None and self.depth_img is not None
 	
 	def info_callback(self, info_msg):
 		# create a camera model from the camera info
@@ -62,6 +58,11 @@ class BlockDetectors(object):
 	def color_image_callback(self,color_msg):
 		#double check img
 		self.color_img = self.bridge.imgmsg_to_cv2(color_msg, "rgb8")
+
+	def depth_image_callback(self,depth_msg):
+		# Data is PointCloud2 msg
+		self.depth_header = depth_msg.header
+		self.depth_img = np.frombuffer(depth_msg.data, dtype=np.float32).reshape(depth_msg.height, depth_msg.width, -1)
 
 	def camera_cube_locator_marker_gen(self, block_positions, color='r', header=None):
 		block_markers = MarkerArray()
@@ -129,13 +130,16 @@ class BlockDetectors(object):
 			self.block_poses['y'] = block_markers
 
 
-	def calculate_tf(self, data):
+	def calculate_tf(self):
 		# Data is PointCloud2 msg
 
-		# Grab fields
-		header = data.header
-		depth_image = np.frombuffer(data.data, dtype=np.float32).reshape(data.height, data.width, -1)
-		Y, X = np.meshgrid(np.arange(data.width), np.arange(data.height))
+		if not self.ready():
+			print("detector not ready")
+			return
+
+		depth_image = self.depth_img
+		height, width = depth_image.shape[0], depth_image.shape[1]
+		Y, X = np.meshgrid(np.arange(width), np.arange(height))
 		meshgrid = np.stack([Y, X], axis=-1)
 
 		# pc=ros_numpy.numpify(data)
@@ -199,20 +203,11 @@ class BlockDetectors(object):
 							center = np.mean(np.array(pc_new.points), axis=0)
 							block_centers.append(center)
 				block_centers = np.array(block_centers)
-				self.camera_cube_locator_marker_gen(block_centers, color=c, header=header)
-		
-	def service_callback(self, req):
-		#this function takes in a requested topic for the image, and returns pixel point
-		#now call the other subscribers
-		self.image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
-		self.block_generator = rospy.Subscriber("/locobot/camera/aligned_depth_to_color/image_raw", Image, self.calculate_tf)
-		# self.block_generator = rospy.Subscriber("/locobot/camera/depth_registered/points", PointCloud2, self.calculate_tf)
+				self.camera_cube_locator_marker_gen(block_centers, color=c, header=self.depth_header)
+	
+	def run(self):
 
-		resp = BlockDetectorResponse()
-		# print('req', req.color.data)
-		# print('resp', self.block_poses[req.color.data])
-		try: 
-			resp.block_poses = self.block_poses[req.color.data]
-			return resp
-		except:
-			print('No visible blocks')
+		self.info_sub = rospy.Subscriber('/locobot/camera/color/camera_info', CameraInfo, self.info_callback)
+		self.color_image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
+		self.depth_image_sub = rospy.Subscriber("/locobot/camera/aligned_depth_to_color/image_raw", Image, self.depth_image_callback)
+

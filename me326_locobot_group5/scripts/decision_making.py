@@ -1,67 +1,66 @@
 #!/usr/bin/env python3
 
 import sys
-import yaml
 
 import rospy
 import numpy as np
 import scipy
-from scipy import linalg
 
 import moveit_commander
-
-import geometry_msgs
-from geometry_msgs.msg import Pose, PointStamped
-from geometry_msgs.msg import Twist
-from geometry_msgs.msg import Point
-from nav_msgs.msg import Odometry
-from visualization_msgs.msg import Marker
-from visualization_msgs.msg import Marker, MarkerArray
-import sensor_msgs.point_cloud2 as pc2
-from sensor_msgs.msg import Image
-from sensor_msgs.msg import PointCloud2
-from sensor_msgs import point_cloud2
-from std_msgs.msg import String
 
 from arm_gripper.arm_classes import MoveLocobotArm
 from arm_gripper.cam_orient import OrientCamera
 
-from me326_locobot_group5.srv import BlockDetector, BlockDetectorResponse
-from detect_block_node import detect_blocks_client
+from perception.detector_classes import BlockDetectors
+from motion_planner import MotionPlanner, MotionPlannerState
+from localizer import Localizer
+
+SLEEP_DT = 1
 
 class PickNPlace():
-	def __init__(self, filepath, robot_id, detect_blocks_fn, camera_orient_obj, moveit_arm_obj) -> None:
-		self.filepath = filepath
-		self.robot_id = robot_id
-		self.block_detect_fn = detect_blocks_fn
+	def __init__(self, camera_orient_obj, moveit_arm_obj) -> None:
+
+		self.detector = BlockDetectors()
 
 		self.camera_orient_obj = camera_orient_obj
 		self.moveit_arm_obj = move_arm_obj
 
 		self.possible_colors = ['r', 'g', 'b', 'y']
 
-		# TODO: subscriber to odom to get current pose
-		# self.current_robo_pos = ...
+		self.robot_id = rospy.get_param('/robot_id')
 
-		odom_topic = 'locobot/odom'
-		self.odom_sub = rospy.Subscriber(odom_topic, Odometry, self.odom_callback)
+		self.blocks = {
+			'r': None,
+			'g': None,
+			'b': None,
+			'y': None
+		}
 
+		self.localizer = Localizer()
+		self.planner = MotionPlanner(self.localizer, self.blocks)
 
 		# Initial steps
 		self.read_configs()
 
-		# self.initial_scan()
+	def run(self):
+		
+		self.localizer.run()
+		self.planner.run()
+		self.detector.run()
+
+		self.wait_for_detector()
+		self.initial_scan()
+		self.go_to_nearest_block(self.colors)
+
 	def read_configs(self):
-		with open(self.filepath, 'r') as stream:
-			data = yaml.safe_load(stream)
 
-		self.station_loc = np.array(data['station_locations'])
+		self.station_loc = rospy.get_param('/station_locations')
 
-		self.target_config = data['target_config']
+		self.target_config = rospy.get_param('/target_config')
 
-		robot_1_colors = data['robot_1_colors']
+		robot_1_colors = rospy.get_param('/robot_1_colors')
 
-		robot_2_colors = data['robot_2_colors']
+		robot_2_colors = rospy.get_param('/robot_2_colors')
 
 		self.colors = []
 		for i in range(4):
@@ -73,38 +72,39 @@ class PickNPlace():
 				self.colors.append(self.possible_colors[i])
 
 		print(self.colors, self.station_loc)
+
 	def initial_scan(self):
-		self.blocks = {
-			'r': None,
-			'g': None,
-			'b': None,
-			'y': None
-		}
+		
 
 		# Tilt camera to see most of the scene in front
 		camera_orient_obj.tilt_camera(0.8)
+		rospy.sleep(SLEEP_DT)
 
 		# TODO: What to set pan at to center?
 
-		for i in range(12):
+		current_heading = self.localizer.pose2d[2]
+		increments = 3 # TODO: increase to 4 or 6
+
+		for i in range(increments):
 			# Update the map of block positions with current image
 			self.update_block_map(self.possible_colors)
 
 			# Rotate x degrees
-			self.spin(30)
+			self.spin(current_heading + (2*np.pi)/increments * (i+1))
 
 	def update_block_map(self, colors):
+
+		self.detector.calculate_tf()
+
 		for col in colors:
-			color = String()
-			color.data = col
 
 			# Returns the poses of all blocks of the color
-			block_poses = detect_blocks_client(color)
+			block_poses = self.detector.block_poses[col]
 
 			blocks_poses = []
 
 			# Consolidates the poses into an array
-			for marker in block_poses.block_poses.markers:
+			for marker in block_poses.markers:
 				block_pose = [marker.pose.position.x,
 					marker.pose.position.y, 
 					marker.pose.position.z]
@@ -113,10 +113,12 @@ class PickNPlace():
 
 			current_positions = self.blocks[col] 
 
-			if current_positions is not None or len(current_positions) > 0:
-				self.blocks[col] = self.update_positions(current_positions, blocks_poses)
-			else:
+			if current_positions is None or len(current_positions) == 0:
 				self.blocks[col] = blocks_poses
+			else:
+				self.blocks[col] = self.update_positions(current_positions, blocks_poses)
+
+		print("block map: ", self.blocks)
 
 	def update_positions(self, data, new_data):
 		# Computes the euclidian distance between the data and the new data and 
@@ -135,65 +137,68 @@ class PickNPlace():
 
 		new_data_to_append = new_data[new_data_indices]
 
-		return np.concatenate([data, new_data_to_append], axis=0)
+		if new_data_to_append.size > 0:
+			return np.concatenate([data, np.atleast_2d(new_data_to_append)], axis=0)
+		else:
+			return data
 
-	def go_to_nearest_block(self, color):
-		block_positions = self.blocks[color]
-		distance_matrix = scipy.spatial.distance_matrix(block_positions, self.current_robo_pos)
-		closest_blck_ind = np.argmin(distance_matrix)
-
-		closest_blck_pos = block_positions[closest_blck_ind]
-
-		# Go to goal that is 0.5 meters away from the target
-		dist_away = 0.5
-		desired_pos = (1 - dist_away/np.linalg.norm(closest_blck_pos - self.current_robo_pos))*(closest_blck_pos - self.current_robo_pos) + self.current_robo_pos
-
-		# TODO: Go to that desired position
+	def go_to_nearest_block(self, colors):
+		
+		self.planner.go_to_nearest_block(colors)
+		self.wait_for_motion()
 
 		# TODO: Pick up the block
 		# TODO: Get the pose of the block in the base linke frame!
-		block_pose = ...
-		move_arm_obj.open_gripper()
-		move_arm_obj.move_gripper_down_to_grasp(block_pose)
-		move_arm_obj.close_gripper()
-		move_arm_obj.move_arm_to_home()
+		# block_pose = ...
+		# move_arm_obj.open_gripper()
+		# move_arm_obj.move_gripper_down_to_grasp(block_pose)
+		# move_arm_obj.close_gripper()
+		# move_arm_obj.move_arm_to_home()
 
-	def go_to_station(self):
-		desired_pos = self.current_station_pos
+	def go_to_station(self, station_idx):
 
-		# TODO: Go to that desired position
+		self.planner.go_to_station(station_idx)
+		self.wait_for_motion()
 
-	def delete_entry(self, data, index):
-		return np.delete(data, index, 0)
+		# TODO: drop the block
 
-	def spin(self, angle=360):
-		pass
+	def spin(self, angle):
+		
+		self.planner.turn_to_heading(angle)
+		self.wait_for_motion()
 
-	def odom_callback(self, data):
-		return np.array(data.pose.pose.position.x, data.pose.pose.position.y, data.pose.pose.position.z)
+	def wait_for_detector(self):
+
+		print("waiting for detector...")
+		while not self.detector.ready():
+			rospy.sleep(SLEEP_DT)
+		print("detector ready")
+
+	def wait_for_motion(self):
+
+		while self.planner.state != MotionPlannerState.IDLE:
+			rospy.sleep(SLEEP_DT)
+	
+
 
 if __name__ == "__main__":
+	
 	rospy.init_node('decision_making')
-
-	### PARAMS
-	robot_id = 1	# Must be either 1 or 2
-	filepath = 'resource_gathering.yaml'
-
-	### End of PARAMS
 
 	moveit_commander.roscpp_initialize(sys.argv)
 
 	# Arm object
-	# move_arm_obj = MoveLocobotArm(moveit_commander=moveit_commander)
-	# move_arm_obj.display_moveit_info()
-	# move_arm_obj.move_arm_down_for_camera()
+	move_arm_obj = MoveLocobotArm(moveit_commander=moveit_commander)
+	move_arm_obj.display_moveit_info()
+	move_arm_obj.move_arm_down_for_camera()
 
-	move_arm_obj = None
+	# move_arm_obj = None
 
 	# Camera orientation object
-	# camera_orient_obj = OrientCamera()
-	camera_orient_obj = None
+	camera_orient_obj = OrientCamera()
+	# camera_orient_obj = None
 
+	picknplace = PickNPlace(camera_orient_obj, move_arm_obj)
+	picknplace.run()
 
-	PickNPlace(filepath, robot_id, detect_blocks_client, camera_orient_obj, move_arm_obj)
 	rospy.spin()

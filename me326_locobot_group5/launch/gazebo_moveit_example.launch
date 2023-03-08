@@ -1,11 +1,20 @@
 <?xml version="1.0" ?>
 <launch>
 
-<group ns="locobot">
-  <node type="detect_block_node.py" name="block_detector" pkg="me326_locobot_group5" respawn="false" output="screen" />
-  <node type="decision_making.py" name="everything" pkg="me326_locobot_group5" respawn="false" output="screen" />
-</group>
+  <arg name="robot_name" default="sim_robot"/>
+  <arg name="robot_id" default="1"/>
 
+  <param name="robot_name" value="$(arg robot_name)"/>
+  <param name="robot_id" value="$(arg robot_id)"/>
+
+  <rosparam file="$(find me326_locobot_group5)/param/robots/$(arg robot_name).yaml" command="load"/>
+  <rosparam file="$(find me326_locobot_group5)/param/resource_gathering.yaml" command="load"/>
+
+  <group ns="locobot">
+    <node type="decision_making.py" name="decision_making" pkg="me326_locobot_group5" respawn="false" output="screen" />
+    <node type="locobot_follow_trajectory.py" name="locobot_follow_trajectory" pkg="me326_locobot_group5" respawn="false" output="screen" launch-prefix="gnome-terminal -x"/>
+  </group>
+  
 </launch>
 
 

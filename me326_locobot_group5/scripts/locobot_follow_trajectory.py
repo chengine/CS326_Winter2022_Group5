@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from enum import Enum
+from enum import IntEnum
 
 import numpy as np
 import scipy.interpolate
@@ -12,7 +12,7 @@ from geometry_msgs.msg import Twist
 from geometry_msgs.msg import Point
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Bool
 from visualization_msgs.msg import Marker
 from me326_locobot_group5.srv import *
 
@@ -21,17 +21,19 @@ from pose_controller import PoseController
 from trajectory_generator import compute_smoothed_traj, modify_traj_with_limits
 from localizer import Localizer
 
+from utils import wrap_to_pi
+
 CTRL_HZ = 50
 CTRL_DT = 1/CTRL_HZ
 
-class State(Enum):
+class TrajectoryFollowerState(IntEnum):
     IDLE = 0,
     TURN_TO_START = 1,
     FOLLOW_TRAJ = 2,
     GO_TO_POSE = 3,
     TURN_TO_FINISH = 4,
 
-class LocobotFollowTrajectory(object):
+class TrajectoryFollower(object):
     
     def __init__(self):
 
@@ -51,6 +53,8 @@ class LocobotFollowTrajectory(object):
 
         self.path_visual = rospy.Publisher('/locobot/mobile_base/path_visual', Path, queue_size=1)
         self.traj_visual = rospy.Publisher('/locobot/mobile_base/traj_visual', Path, queue_size=1)
+
+        self.idle_publisher = rospy.Publisher('/traj_follower/idle', Bool)
 
         if self.robot_type == "sim":
             self.frame_id = "locobot/odom"
@@ -84,7 +88,7 @@ class LocobotFollowTrajectory(object):
         # set up controllers
         self.ramsete = Ramsete(b=2.0, zeta=0.8)
         self.pose_controller = PoseController(k1=0.4, k2=0.8, k3=0.8)
-        self.heading_kP = 0.5
+        self.heading_kP = 1.0
         self.traj_complete_thresh = 0.2 # m
         self.at_pose_thresh = 0.05 # m
         self.at_heading_thresh = np.radians(2) # deg
@@ -96,7 +100,7 @@ class LocobotFollowTrajectory(object):
         
         self.last_timestamp = rospy.Time.now()
 
-        self.state = State.IDLE
+        self.state = TrajectoryFollowerState.IDLE
         self.controller = "none"
 
         self.t_final = 0
@@ -130,12 +134,12 @@ class LocobotFollowTrajectory(object):
             poses=[PoseStamped(pose=Pose(position=Point(x=(traj_pt := self.traj(t))[0], y=traj_pt[1]))) for t in np.linspace(0, self.t_final, 100)]
         )
 
-        self.transition_state(State.TURN_TO_START)
+        self.transition_state(TrajectoryFollowerState.TURN_TO_START)
 
     def follow_abs_path(self, req):
 
         path = np.array([req.x, req.y]).T
-        self.set_traj(path, req.final_heading)
+        self.set_traj(path, wrap_to_pi(req.final_heading))
 
         return {}
     
@@ -146,15 +150,15 @@ class LocobotFollowTrajectory(object):
 
         path = (R @ np.array([req.x, req.y])).T + self.localizer.pose2d[0:2]
         
-        self.set_traj(path, self.localizer.pose2d[2] + req.final_heading)
+        self.set_traj(path, self.localizer.pose2d[2] + wrap_to_pi(req.final_heading))
 
         return {}
 
     def turn_heading(self, req):
 
-        self.x_final = np.array([*self.localizer.pose2d[0:2], req.heading])
-        self.theta_final = req.heading
-        self.transition_state(State.TURN_TO_FINISH)
+        self.x_final = np.array([*self.localizer.pose2d[0:2], wrap_to_pi(req.heading)])
+        self.theta_final = wrap_to_pi(req.heading)
+        self.transition_state(TrajectoryFollowerState.TURN_TO_FINISH)
 
         return {}
 
@@ -194,20 +198,20 @@ class LocobotFollowTrajectory(object):
 
         new_state = self.state
 
-        if self.state == State.IDLE:
+        if self.state == TrajectoryFollowerState.IDLE:
             pass
-        elif self.state == State.TURN_TO_START:
+        elif self.state == TrajectoryFollowerState.TURN_TO_START:
             if abs(self.x_goal[2]-x[2]) < self.at_heading_thresh:
-                new_state = State.FOLLOW_TRAJ
-        elif self.state == State.FOLLOW_TRAJ:
+                new_state = TrajectoryFollowerState.FOLLOW_TRAJ
+        elif self.state == TrajectoryFollowerState.FOLLOW_TRAJ:
             if np.linalg.norm(self.x_final[0:2]-x[0:2]) < self.traj_complete_thresh or t > self.t_final:
-                new_state = State.GO_TO_POSE
-        elif self.state == State.GO_TO_POSE:
+                new_state = TrajectoryFollowerState.GO_TO_POSE
+        elif self.state == TrajectoryFollowerState.GO_TO_POSE:
             if np.linalg.norm(self.x_goal[0:2]-x[0:2]) < self.at_pose_thresh:
-                new_state = State.TURN_TO_FINISH
-        elif self.state == State.TURN_TO_FINISH:
+                new_state = TrajectoryFollowerState.TURN_TO_FINISH
+        elif self.state == TrajectoryFollowerState.TURN_TO_FINISH:
             if abs(self.x_goal[2]-x[2]) < self.at_heading_thresh:
-                new_state = State.IDLE
+                new_state = TrajectoryFollowerState.IDLE
 
         return new_state
     
@@ -216,21 +220,22 @@ class LocobotFollowTrajectory(object):
         if new_state != self.state:
             print("OLD_STATE:", self.state, "-> NEW_STATE:", new_state)
             self.state = new_state
-            if self.state == State.IDLE:
+            if self.state == TrajectoryFollowerState.IDLE:
                 self.x_goal = self.localizer.pose2d
                 self.path_msg = self.empty_path
                 self.traj_msg = self.empty_path
                 self.controller = "none"
-            elif self.state == State.TURN_TO_START:
+                self.idle_publisher.publish(Bool(True))
+            elif self.state == TrajectoryFollowerState.TURN_TO_START:
                 self.x_goal = self.x_initial
                 self.controller = "heading"
-            elif self.state == State.FOLLOW_TRAJ:
+            elif self.state == TrajectoryFollowerState.FOLLOW_TRAJ:
                 # self.x_goal is updated every cycle in controller
                 self.controller = "ramsete"
-            elif self.state == State.GO_TO_POSE:
+            elif self.state == TrajectoryFollowerState.GO_TO_POSE:
                 self.x_goal = self.x_final
                 self.controller = "pose"
-            elif self.state == State.TURN_TO_FINISH:
+            elif self.state == TrajectoryFollowerState.TURN_TO_FINISH:
                 self.x_goal = np.concatenate((self.x_final[0:2], np.atleast_1d(self.theta_final)))
                 self.controller = "heading"
             self.last_timestamp = rospy.Time.now()
@@ -278,14 +283,15 @@ class LocobotFollowTrajectory(object):
         elif self.controller == "heading":
 
             theta_goal = self.x_goal[2]
-            v, w = (0, self.heading_kP * ((theta_goal - x[2] + np.pi) % (2*np.pi) - np.pi))
+            theta_error = wrap_to_pi(theta_goal - x[2])
+            v, w = (0, self.heading_kP * theta_error)
 
             print('x: ', x)
             print('x_goal: ', self.x_goal)
             print('pose_error: ', np.linalg.norm(self.x_goal[0:2]-x[0:2]))
             print('current heading: ', x[2])
             print('goal heading: ', theta_goal)
-            print('heading error: ', theta_goal-x[2])
+            print('heading error: ', theta_error)
 
         else:
 
@@ -328,7 +334,7 @@ class LocobotFollowTrajectory(object):
 
 def main():
     rospy.init_node('locobot_follow_trajectory')
-    cls_obj = LocobotFollowTrajectory()
+    cls_obj = TrajectoryFollower()
     # cls_obj.set_traj(
     #     path = np.array([
     #         [0, 0],

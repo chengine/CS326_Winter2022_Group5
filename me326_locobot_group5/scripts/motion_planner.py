@@ -1,38 +1,28 @@
 #!/usr/bin/env python3
 
-from enum import Enum
+from enum import IntEnum
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R
+from matplotlib import pyplot as plt
 
 import rospy
-from geometry_msgs.msg import Pose, PoseStamped
-from geometry_msgs.msg import Twist
-
-from nav_msgs.msg import Odometry
-
-from me326_locobot_group5.srv import *
-from matplotlib import pyplot as plt
+from std_msgs.msg import Bool
 
 import dijkstra3d
 
-from localizer import Localizer
+from me326_locobot_group5.srv import *
+from utils import wrap_to_pi
 
-PLAN_HZ = 1
-PLAN_DT = 1/PLAN_HZ
 
-class State(Enum):
+BIG_NUMBER = 10000
+
+class MotionPlannerState(IntEnum):
     IDLE = 0,
-    STARTUP = 1,
-    SCAN_FOR_BLOCKS = 2,
-    DRIVE_TO_BLOCK = 3,
-    GRAB_BLOCK = 4,
-    DRIVE_TO_GOAL = 5,
-    DROP_BLOCK = 6,
+    EXECUTING = 1,
 
 class MotionPlanner():
     
-    def __init__(self):
+    def __init__(self, localizer, blocks):
 
         # ros params
         self.robot_name = rospy.get_param('/robot_name')
@@ -42,9 +32,20 @@ class MotionPlanner():
             'y' : rospy.get_param('/frame_offset/y'),
             'theta' : rospy.get_param('/frame_offset/theta')
         }
-        
+        self.robot_id = rospy.get_param('/robot_id')
+
+        self.station_locations = np.array(rospy.get_param('/station_locations'))
+        self.target_config = np.array(rospy.get_param('/target_config'))
+        self.robot_1_colors = np.array(rospy.get_param('/robot_1_colors')).flatten()
+        self.robot_2_colors = np.array(rospy.get_param('/robot_2_colors')).flatten()
+
+        self.possible_colors = ['r', 'g', 'b', 'y']
+
+        self.my_colors = [self.possible_colors[i] for i in (self.robot_1_colors.nonzero()[0] if self.robot_id == 1 else self.robot_2_colors.nonzero()[0])]
+
         # services
         self.abs_path_service = rospy.ServiceProxy('/traj_follower/abs_path', FollowPath)
+        self.turn_heading_service = rospy.ServiceProxy('/traj_follower/turn_heading', TurnHeading)
 
         # parameters
         self.x_bounds = [-2, 2]
@@ -54,19 +55,15 @@ class MotionPlanner():
         self.grid_x, self.grid_y = np.meshgrid(np.linspace(*self.x_bounds, self.grid_length), np.linspace(*self.y_bounds, self.grid_length))
 
         # initialize measurements
-        self.localizer = Localizer()
+        self.localizer = localizer
 
-        self.blocks = [
-            (-1, 0.5, "g"),
-            # (0.1, -0.3, "r"),
-            # (0.5, 0,5, "b"),
-            # (-0.1, -0.1, "y"),
-        ]
-
-        self.colors = ["g", "r"]
-
+        # initialize blocks list
+        self.blocks = blocks
+        
         self.block_r = 0.03
-        self.robot_r = 0.3
+        self.robot_r = 0.2
+
+        self.state = MotionPlannerState.IDLE
 
     def pose_to_idx(self, x, y):
 
@@ -82,95 +79,88 @@ class MotionPlanner():
             self.y_bounds[0] + np.array(y, dtype=np.float_) / (self.grid_length-1) * (self.y_bounds[1]-self.y_bounds[0])
         )
 
-    def check_state_transitions(self):
+    def turn_to_heading(self, heading):
 
-        new_state = self.state
+        heading = wrap_to_pi(heading)
 
-        if self.state == State.IDLE:
-            pass
-        elif self.state == State.STARTUP:
-            if self.localizer.is_valid():
-                new_state = State.SCAN_FOR_BLOCKS
-        elif self.state == State.SCAN_FOR_BLOCKS:
-            if True: # if we have a nearest block
-                new_state = State.DRIVE_TO_BLOCK
-        elif self.state == State.DRIVE_TO_BLOCK:
-            if True: # if we are at the block
-                new_state = State.GRAB_BLOCK
-        elif self.state == State.GRAB_BLOCK:
-            if True: # if we have the block
-                new_state = State.DRIVE_TO_GOAL
-        elif self.state == State.DRIVE_TO_GOAL:
-            if True: # if we are at the goal
-                new_state = State.DROP_BLOCK
-        elif self.state == State.DROP_BLOCK:
-            if True: # if we have dropped the block
-                new_state = State.DRIVE_TO_BLOCK
+        print("turn_to_heading: ", heading)
 
-        return new_state
-    
-    def transition_state(self, new_state):
+        self.turn_heading_service(heading)
+        self.state = MotionPlannerState.EXECUTING
 
-        if new_state != self.state:
-            print("OLD_STATE:", self.state, "-> NEW_STATE:", new_state)
-            self.state = new_state
-            if self.state == State.IDLE:
-                self.x_goal = self.current_x
-                self.path_msg = self.empty_path
-                self.traj_msg = self.empty_path
-                self.controller = "none"
-            elif self.state == State.TURN_TO_START:
-                self.x_goal = self.x_initial
-                self.controller = "heading"
-            elif self.state == State.FOLLOW_TRAJ:
-                # self.x_goal is updated every cycle in controller
-                self.controller = "ramsete"
-            elif self.state == State.GO_TO_POSE:
-                self.x_goal = self.x_final
-                self.controller = "pose"
-            elif self.state == State.TURN_TO_FINISH:
-                self.x_goal = np.concatenate((self.x_final[0:2], np.atleast_1d(self.theta_final)))
-                self.controller = "heading"
-            self.last_timestamp = rospy.Time.now()
+    def go_to_nearest_block(self, colors=None):
+        
+        if colors is None:
+            colors = self.my_colors
+        
+        if isinstance(colors, str):
+            colors = [colors,]
 
-    def plan_motion(self):
+        print("go_to_nearest_block: ", colors)
 
-        field = np.ones((self.grid_length, self.grid_length), dtype=bool)
+        blocks_of_interest = [b for c in colors for b in self.blocks[c]]
 
-        # for x,y,c in self.blocks:
+        nearest_block = min(blocks_of_interest, key=lambda b: (self.localizer.pose2d[0]-b[0])**2+(self.localizer.pose2d[1]-b[1])**2)
+
+        diff = nearest_block[0:2] - self.localizer.pose2d[0:2]
+        diff = diff / np.linalg.norm(diff)
+
+        goal_pos = nearest_block[0:2] - (self.block_r+self.robot_r+0.1) * diff
+
+        self.plan_motion(goal_pos, np.arctan2(diff[1], diff[0]))
+
+    def go_to_station(self, station_idx):
+
+        print("go_to_station: ", station_idx)
+
+        station_pos = self.station_locations[station_idx]
+
+        diff = station_pos[0:2] - self.localizer.pose2d[0:2]
+        diff = diff / np.linalg.norm(diff)
+
+        goal_pos = station_pos[0:2] - (self.block_r+self.robot_r+0.1) * diff
+
+        self.plan_motion(goal_pos, np.arctan2(diff[1], diff[0]))
+
+
+    def plan_motion(self, goal_pos, final_heading):
+
+        # plan and try to avoid known blocks
+        field = np.ones((self.grid_length, self.grid_length),dtype=np.int_)
+        
+        for x,y,_ in [b for v in self.blocks.values() for b in v]:
             
-        #     field = field & (((self.grid_x - x)**2 + (self.grid_y-y)**2) >= (self.block_r+self.robot_r)**2)
+            field[((self.grid_x - x)**2 + (self.grid_y-y)**2) >= (self.block_r+self.robot_r)**2] = BIG_NUMBER
 
-        nearest_block = min([b for b in self.blocks if b[2] in self.colors], key=lambda b: (self.current_x[0]-b[0])**2+(self.current_x[1]-b[1])**2)
+        for x,y,r in self.station_locations:
 
-        path = dijkstra3d.dijkstra(field, self.pose_to_idx(*self.current_x[0:2]), self.pose_to_idx(nearest_block[0], nearest_block[1]), compass=True, connectivity=8)
+            field[((self.grid_x - x)**2 + (self.grid_y-y)**2) >= (r+self.robot_r)**2] = BIG_NUMBER
+
+        path = dijkstra3d.dijkstra(field, self.pose_to_idx(*self.localizer.pose2d[0:2]), self.pose_to_idx(goal_pos[0], goal_pos[1]))
 
         path_x, path_y = self.idx_to_pose(path[:,0], path[:,1])
 
         plt.plot(path_x, path_y)
+        t = np.linspace(0,2*np.pi,100)
+        plt.plot(self.localizer.pose2d[0]+self.robot_r*np.cos(t), self.localizer.pose2d[1]+self.robot_r*np.sin(t), color='green')
+        for x,y,r in self.station_locations:
+            plt.plot(x+r*np.cos(t),y+r*np.sin(t), color='gray', ls='--')
+        for c,(x,y,_) in [(k,b) for k,v in self.blocks.items() for b in v]:
+            plt.scatter(x,y,color=c,zorder=4)
         plt.show()
 
         print(path_x, path_y)
         
-        self.abs_path_service(path_x.astype(np.float32), path_y.astype(np.float32), np.nan)
+        self.abs_path_service(path_x.astype(np.float32), path_y.astype(np.float32), final_heading)
+        self.state = MotionPlannerState.EXECUTING
+
+    def traj_follower_idle_callback(self, data):
+        if data.data:
+            self.state = MotionPlannerState.IDLE
 
     def run(self):
-        
-        self.localizer.run()
 
-        rate = rospy.Rate(PLAN_HZ)
-
-        while not rospy.is_shutdown():
-            self.plan_motion()
-            rate.sleep()
-        
-
-def main():
-    rospy.init_node('motion_planner')
-    cls_obj = MotionPlanner()
-    cls_obj.run()
+        rospy.Subscriber('/traj_follower/idle', Bool, self.traj_follower_idle_callback)
 
 
-if __name__ == '__main__':
-    main()
 

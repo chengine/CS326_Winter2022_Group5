@@ -1,4 +1,0 @@
-std_msgs/String color
----
-visualization_msgs/MarkerArray block_poses
-
