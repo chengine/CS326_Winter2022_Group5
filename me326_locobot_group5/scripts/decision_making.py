@@ -8,22 +8,25 @@ import scipy
 
 import moveit_commander
 
-from arm_gripper.arm_classes import MoveLocobotArm
-from arm_gripper.cam_orient import OrientCamera
+from cam_orient import OrientCamera
+from me326_locobot_group5.srv import *
 
-from perception.detector_classes import BlockDetectors
+from detector import BlockDetectors
 from motion_planner import MotionPlanner, MotionPlannerState
 from localizer import Localizer
+import tf
+from geometry_msgs.msg import Point, Pose
 
 SLEEP_DT = 1
 
 class PickNPlace():
-	def __init__(self, camera_orient_obj, moveit_arm_obj) -> None:
+	def __init__(self) -> None:
 
 		self.detector = BlockDetectors()
 
-		self.camera_orient_obj = camera_orient_obj
-		self.moveit_arm_obj = move_arm_obj
+		self.cam_orient_obj = OrientCamera  
+		self.move_to_grasp_service = rospy.ServiceProxy('/arm_gripper/grab', GrabBlock)
+		self.arm_modes_service = rospy.ServiceProxy('/arm_gripper/modes', Modes)
 
 		self.possible_colors = ['r', 'g', 'b', 'y']
 
@@ -42,6 +45,8 @@ class PickNPlace():
 		# Initial steps
 		self.read_configs()
 
+		# create a tf listener
+		self.listener = tf.TransformListener()
 	def run(self):
 		
 		self.localizer.run()
@@ -77,7 +82,7 @@ class PickNPlace():
 		
 
 		# Tilt camera to see most of the scene in front
-		camera_orient_obj.tilt_camera(0.8)
+		self.cam_orient_obj.tilt_camera(0.8)
 		rospy.sleep(SLEEP_DT)
 
 		# TODO: What to set pan at to center?
@@ -142,18 +147,29 @@ class PickNPlace():
 		else:
 			return data
 
-	def go_to_nearest_block(self, colors):
+	def go_to_nearest_block_and_grasp(self, colors):
 		
 		self.planner.go_to_nearest_block(colors)
 		self.wait_for_motion()
 
 		# TODO: Pick up the block
-		# TODO: Get the pose of the block in the base linke frame!
-		# block_pose = ...
-		# move_arm_obj.open_gripper()
-		# move_arm_obj.move_gripper_down_to_grasp(block_pose)
-		# move_arm_obj.close_gripper()
-		# move_arm_obj.move_arm_to_home()
+		# TODO: Get the pose of the block in the base link frame!
+		blocks_of_interest = [b for c in colors for b in self.blocks[c]]
+		nearest_block = min(blocks_of_interest, key=lambda b: (self.localizer.pose2d[0]-b[0])**2+(self.localizer.pose2d[1]-b[1])**2)
+
+		point_3d_geom_msg = Point()
+		point_3d_geom_msg.header = 'locobot/odom'
+		point_3d_geom_msg.point.x = nearest_block[0]
+		point_3d_geom_msg.point.y = nearest_block[1]
+		point_3d_geom_msg.point.z = 0.03
+		block_in_base_link_frame = self.listener.transformPoint('locobot/base_link', point_3d_geom_msg)
+
+		block_pose = Pose()
+		block_pose.position.x = block_in_base_link_frame.point.x
+		block_pose.position.y = block_in_base_link_frame.point.y
+		block_pose.position.z = block_in_base_link_frame.point.z
+
+		self.move_to_grasp_service(block_pose)
 
 	def go_to_station(self, station_idx):
 
@@ -182,23 +198,9 @@ class PickNPlace():
 
 
 if __name__ == "__main__":
-	
 	rospy.init_node('decision_making')
 
-	moveit_commander.roscpp_initialize(sys.argv)
-
-	# Arm object
-	move_arm_obj = MoveLocobotArm(moveit_commander=moveit_commander)
-	move_arm_obj.display_moveit_info()
-	move_arm_obj.move_arm_down_for_camera()
-
-	# move_arm_obj = None
-
-	# Camera orientation object
-	camera_orient_obj = OrientCamera()
-	# camera_orient_obj = None
-
-	picknplace = PickNPlace(camera_orient_obj, move_arm_obj)
+	picknplace = PickNPlace()
 	picknplace.run()
 
 	rospy.spin()
