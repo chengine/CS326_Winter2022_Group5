@@ -21,6 +21,15 @@ from image_geometry import PinholeCameraModel
 class BlockDetectors(object):
 	"""docstring for BlockDetector"""
 	def __init__(self, block_colors=['r', 'g', 'b', 'y']):
+		
+		# ros params
+		self.robot_type = rospy.get_param('/robot_type')
+
+		if self.robot_type == "sim":
+			self.frame_id = "locobot/odom"
+		elif self.robot_type == "physical":
+			self.frame_id = "map"
+	
 		self.bridge = CvBridge()	
 	
 		self.camera_cube_locator_markers_r = rospy.Publisher("/locobot/blocks/visual_r", MarkerArray, queue_size=1)
@@ -72,14 +81,14 @@ class BlockDetectors(object):
 			point_3d_geom_msg.point.x = block_xyz[0]
 			point_3d_geom_msg.point.y = block_xyz[1]
 			point_3d_geom_msg.point.z = block_xyz[2]
-			rotated_points = self.listener.transformPoint('locobot/odom', point_3d_geom_msg)
+			rotated_points = self.listener.transformPoint(self.frame_id, point_3d_geom_msg)
 
 			if abs(rotated_points.point.z) > 0.1 :
 				continue
 
 			#this is very simple because we are just putting the point P in the base_link frame (it is static in this frame)
 			marker = Marker()
-			marker.header.frame_id = "locobot/odom"
+			marker.header.frame_id = self.frame_id
 			marker.header.stamp = rospy.Time.now()
 			marker.id = ind
 			marker.type = Marker.SPHERE

@@ -4,12 +4,8 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /Global Options1
-        - /Status1
         - /TF1/Frames1
-        - /Path1
-        - /Path2
-        - /Odometry1
+        - /RobotModel1/Status1
       Splitter Ratio: 0.48819562792778015
     Tree Height: 1482
   - Class: rviz/Selection
@@ -204,7 +200,7 @@ Visualization Manager:
       Marker Topic: /locobot/mobile_base/target_pose_visual
       Name: Marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Alpha: 1
@@ -290,6 +286,183 @@ Visualization Manager:
       Topic: /locobot/mobile_base/odom
       Unreliable: false
       Value: false
+    - Alpha: 1
+      Class: rviz/RobotModel
+      Collision Enabled: false
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        locobot/ar_tag_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/arm_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/base_footprint:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/battery_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/camera_depth_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/camera_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/camera_tower_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/caster_back_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/caster_front_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/cliff_sensor_front_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/cliff_sensor_left_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/cliff_sensor_right_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/ee_arm_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/ee_gripper_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/fingers_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/gripper_bar_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/gripper_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/gripper_prop_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/gyro_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        locobot/laser_frame_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/left_finger_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/lidar_tower_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/lower_forearm_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/pan_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/plate_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/right_finger_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/shoulder_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/tilt_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/upper_arm_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/upper_forearm_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/wheel_left_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/wheel_right_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        locobot/wrist_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+      Name: RobotModel
+      Robot Description: locobot/robot_description
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -318,7 +491,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 7.960237979888916
+      Distance: 4.773718357086182
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -334,9 +507,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.4997963905334473
+      Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
-      Yaw: 3.1753971576690674
+      Yaw: 3.155400276184082
     Saved: ~
 Window Geometry:
   Displays:
