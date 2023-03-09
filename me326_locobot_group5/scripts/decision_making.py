@@ -12,21 +12,30 @@ from cam_orient import OrientCamera
 from me326_locobot_group5.srv import *
 
 from detector import BlockDetectors
+from arm_gripper import MoveLocobotArm
 from motion_planner import MotionPlanner, MotionPlannerState
 from localizer import Localizer
 import tf
-from geometry_msgs.msg import Point, Pose
+from geometry_msgs.msg import PointStamped, Pose
 
 SLEEP_DT = 1
 
 class PickNPlace():
 	def __init__(self) -> None:
 
+		# ros params
+		self.robot_type = rospy.get_param('/robot_type')
+
+		if self.robot_type == "sim":
+			self.frame_id = "locobot/odom"
+		elif self.robot_type == "physical":
+			self.frame_id = "map"
+
 		self.detector = BlockDetectors()
 
 		self.cam_orient_obj = OrientCamera()
-		# self.move_to_grasp_service = rospy.ServiceProxy('/arm_gripper/grab', GrabBlock)
-		# self.arm_modes_service = rospy.ServiceProxy('/arm_gripper/modes', Modes)
+		self.move_to_grasp_service = rospy.ServiceProxy('/arm_gripper/grab', GrabBlock)
+		self.arm_modes_service = rospy.ServiceProxy('/arm_gripper/modes', Modes)
 
 		self.possible_colors = ['r', 'g', 'b', 'y']
 
@@ -53,6 +62,7 @@ class PickNPlace():
 		self.planner.run()
 		self.detector.run()
 
+		self.arm_modes_service("Down")
 		self.wait_for_detector()
 		self.initial_scan()
 		self.go_to_nearest_block_and_grasp(self.colors)
@@ -78,17 +88,17 @@ class PickNPlace():
 
 		print(self.colors, self.station_loc)
 
+
 	def initial_scan(self):
 		
-
 		# Tilt camera to see most of the scene in front
-		self.cam_orient_obj.tilt_camera(0.8)
+		self.cam_orient_obj.tilt_camera(0.6)
 		rospy.sleep(SLEEP_DT)
 
 		# TODO: What to set pan at to center?
 
 		current_heading = self.localizer.pose2d[2]
-		increments = 1 # TODO: increase to 4 or 6
+		increments = 3 # TODO: increase to 4 or 6
 
 		for i in range(increments):
 			# Update the map of block positions with current image
@@ -132,10 +142,6 @@ class PickNPlace():
 		if len(new_data) == 0:
 			return data
 		
-		print("DATA SHAPE: ", data.shape)
-		print("NEW DATA SHAPE: ", new_data.shape)
-
-		
 		distance_matrix = scipy.spatial.distance_matrix(data, new_data)
 
 		# If a new data point has no matches (i.e. the column corresponding to it has no hits), we
@@ -146,7 +152,6 @@ class PickNPlace():
 		hits = np.sum(binary_mask, axis=0)
 
 		new_data_indices = np.argwhere(hits == 0)
-		print("new_data_indices shape: ", new_data_indices.shape)
 
 		new_data_to_append = new_data[new_data_indices]
 
@@ -160,13 +165,15 @@ class PickNPlace():
 		self.planner.go_to_nearest_block(colors)
 		self.wait_for_motion()
 
+		self.update_block_map(self.possible_colors)
+
 		# TODO: Pick up the block
 		# TODO: Get the pose of the block in the base link frame!
 		blocks_of_interest = [b for c in colors for b in self.blocks[c]]
 		nearest_block = min(blocks_of_interest, key=lambda b: (self.localizer.pose2d[0]-b[0])**2+(self.localizer.pose2d[1]-b[1])**2)
 
-		point_3d_geom_msg = Point()
-		point_3d_geom_msg.header = 'map'
+		point_3d_geom_msg = PointStamped()
+		point_3d_geom_msg.header.frame_id = self.frame_id
 		point_3d_geom_msg.point.x = nearest_block[0]
 		point_3d_geom_msg.point.y = nearest_block[1]
 		point_3d_geom_msg.point.z = 0.03

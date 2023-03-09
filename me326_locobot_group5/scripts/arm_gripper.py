@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import rospy
 import numpy as np
 
@@ -65,7 +67,7 @@ class MoveLocobotArm(object):
 		return {}
 		
 	def mode_action(self, req):
-		mode = req.mode.data
+		mode = req.mode
 
 		if mode == 'Sleep':
 			self.move_arm_to_sleep()
@@ -173,12 +175,15 @@ class MoveLocobotArm(object):
 			print('Not feasible goal')
 
 def main():
+
 	rospy.init_node('locobot_arm_gripper')
 	moveit_commander.roscpp_initialize(sys.argv)
 
 	# Arm object
 	move_arm_obj = MoveLocobotArm(moveit_commander=moveit_commander)
 	move_arm_obj.display_moveit_info()
+
+	rospy.spin()
 
 if __name__ == '__main__':
 	main()

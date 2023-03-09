@@ -6,7 +6,6 @@ Panels:
       Expanded:
         - /Global Options1
         - /TF1/Frames1
-        - /MarkerArray1/Status1
       Splitter Ratio: 0.48819562792778015
     Tree Height: 1482
   - Class: rviz/Selection
@@ -68,15 +67,7 @@ Visualization Manager:
           Value: true
         locobot/battery_link:
           Value: false
-        locobot/camera_aligned_depth_to_color_frame:
-          Value: true
-        locobot/camera_color_frame:
-          Value: true
-        locobot/camera_color_optical_frame:
-          Value: true
-        locobot/camera_depth_frame:
-          Value: true
-        locobot/camera_depth_optical_frame:
+        locobot/camera_depth_link:
           Value: true
         locobot/camera_link:
           Value: false
@@ -114,6 +105,8 @@ Visualization Manager:
           Value: false
         locobot/lower_forearm_link:
           Value: false
+        locobot/odom:
+          Value: true
         locobot/pan_link:
           Value: false
         locobot/plate_link:
@@ -134,12 +127,6 @@ Visualization Manager:
           Value: false
         locobot/wrist_link:
           Value: false
-        locobot_1:
-          Value: true
-        locobot_3:
-          Value: true
-        map:
-          Value: true
       Marker Alpha: 1
       Marker Scale: 1
       Name: TF
@@ -147,7 +134,7 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        map:
+        locobot/odom:
           locobot/base_footprint:
             locobot/base_link:
               locobot/camera_tower_link:
@@ -157,14 +144,8 @@ Visualization Manager:
                 locobot/pan_link:
                   locobot/tilt_link:
                     locobot/camera_link:
-                      locobot/camera_aligned_depth_to_color_frame:
-                        locobot/camera_color_optical_frame:
-                          {}
-                      locobot/camera_color_frame:
+                      locobot/camera_depth_link:
                         {}
-                      locobot/camera_depth_frame:
-                        locobot/camera_depth_optical_frame:
-                          {}
               locobot/caster_back_link:
                 {}
               locobot/caster_front_link:
@@ -204,10 +185,6 @@ Visualization Manager:
                 {}
               locobot/wheel_right_link:
                 {}
-          locobot_1:
-            {}
-          locobot_3:
-            {}
       Update Interval: 0
       Value: true
     - Class: rviz/Marker
@@ -223,7 +200,7 @@ Visualization Manager:
       Marker Topic: /locobot/mobile_base/target_pose_visual
       Name: Marker
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Alpha: 1
@@ -343,6 +320,10 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        locobot/camera_depth_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
         locobot/camera_link:
           Alpha: 1
           Show Axes: false
@@ -352,6 +333,7 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
+          Value: true
         locobot/caster_back_link:
           Alpha: 1
           Show Axes: false
@@ -434,6 +416,7 @@ Visualization Manager:
           Alpha: 1
           Show Axes: false
           Show Trail: false
+          Value: true
         locobot/right_finger_link:
           Alpha: 1
           Show Axes: false
@@ -485,7 +468,7 @@ Visualization Manager:
       Marker Topic: /locobot/blocks/visual_b
       Name: MarkerArray
       Namespaces:
-        "": true
+        {}
       Queue Size: 100
       Value: true
     - Class: rviz/MarkerArray
@@ -516,7 +499,7 @@ Visualization Manager:
   Global Options:
     Background Color: 48; 48; 48
     Default Light: true
-    Fixed Frame: map
+    Fixed Frame: locobot/odom
     Frame Rate: 30
   Name: root
   Tools:
@@ -556,9 +539,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.8097964525222778
+      Pitch: 0.9997962117195129
       Target Frame: <Fixed Frame>
-      Yaw: 0.9222208857536316
+      Yaw: 3.1522200107574463
     Saved: ~
 Window Geometry:
   Displays:

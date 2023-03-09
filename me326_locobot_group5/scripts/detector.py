@@ -1,7 +1,5 @@
-# import cv2
 import numpy as np
 import open3d as o3d
-# import ros_numpy
 from utils import mask_grid
 
 import cv2
@@ -13,7 +11,6 @@ from geometry_msgs.msg import Pose, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from sensor_msgs.msg import Image, CameraInfo
 from image_geometry import PinholeCameraModel
-# import ros_numpy
 
 from std_msgs.msg import Header
 import sensor_msgs.point_cloud2 as point_cloud2
@@ -49,10 +46,10 @@ class BlockDetectors(object):
 	
 		self.bridge = CvBridge()	
 	
-		self.camera_cube_locator_markers_r = rospy.Publisher("/locobot/blocks/visual_r", MarkerArray, queue_size=1)
-		self.camera_cube_locator_markers_g = rospy.Publisher("/locobot/blocks/visual_g", MarkerArray, queue_size=1)
-		self.camera_cube_locator_markers_b = rospy.Publisher("/locobot/blocks/visual_b", MarkerArray, queue_size=1)
-		self.camera_cube_locator_markers_y = rospy.Publisher("/locobot/blocks/visual_y", MarkerArray, queue_size=1)
+		self.camera_cube_locator_markers = {
+			c : rospy.Publisher(f"/locobot/blocks/visual_{c}", MarkerArray, queue_size=1) for c in block_colors
+		}
+		
 		self.imgs_with_blocks_bb = rospy.Publisher("/locobot/blocks/bounding_box", Image, queue_size=1, latch=True)
 
 		self.filt_img_blocks = rospy.Publisher("/locobot/blocks/filter_img", Image, queue_size=1, latch=True)
@@ -62,11 +59,13 @@ class BlockDetectors(object):
 		self.block_colors = block_colors
 
 		self.block_poses = {
-			'r': MarkerArray(),
-			'g': MarkerArray(),
-			'b': MarkerArray(),
-			'y': MarkerArray()
+			c: MarkerArray() for c in block_colors
 		}
+
+		# publish empty marker array to clear old markers
+		for c in block_colors:
+			self.camera_cube_locator_markers[c].publish(self.block_poses[c])
+
 		# create a tf listener
 		self.tf_buffer = tf2_ros.Buffer()
 		self.listener = tf2_ros.TransformListener(self.tf_buffer)
@@ -147,21 +146,9 @@ class BlockDetectors(object):
 
 		# Publish the marker
 		block_markers.markers = marks
-		if color == 'r':
-			self.camera_cube_locator_markers_r.publish(block_markers)
-			self.block_poses['r'] = block_markers
 
-		if color == 'g':
-			self.camera_cube_locator_markers_g.publish(block_markers)
-			self.block_poses['g'] = block_markers
-
-		if color == 'b':
-			self.camera_cube_locator_markers_b.publish(block_markers)
-			self.block_poses['b'] = block_markers
-
-		else:
-			self.camera_cube_locator_markers_y.publish(block_markers)
-			self.block_poses['y'] = block_markers
+		self.camera_cube_locator_markers[color].publish(block_markers)
+		self.block_poses[color] = block_markers
 
 
 	def calculate_tf(self):

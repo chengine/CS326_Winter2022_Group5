@@ -14,8 +14,6 @@ from me326_locobot_group5.srv import *
 from utils import wrap_to_pi
 
 
-BIG_NUMBER = 10000
-
 class MotionPlannerState(IntEnum):
     IDLE = 0,
     EXECUTING = 1,
@@ -63,6 +61,9 @@ class MotionPlanner():
         self.block_r = 0.03
         self.robot_r = 0.2
 
+        self.robot_stop_buffer = 0.25
+        self.robot_avoid_buffer = 0.05
+
         self.state = MotionPlannerState.IDLE
 
     def pose_to_idx(self, x, y):
@@ -79,6 +80,7 @@ class MotionPlanner():
             self.y_bounds[0] + np.array(y, dtype=np.float_) / (self.grid_length-1) * (self.y_bounds[1]-self.y_bounds[0])
         )
 
+
     def turn_to_heading(self, heading):
 
         heading = wrap_to_pi(heading)
@@ -87,6 +89,7 @@ class MotionPlanner():
 
         self.turn_heading_service(heading)
         self.state = MotionPlannerState.EXECUTING
+
 
     def go_to_nearest_block(self, colors=None):
         
@@ -100,14 +103,14 @@ class MotionPlanner():
 
         blocks_of_interest = [b for c in colors for b in self.blocks[c]]
 
+        if not blocks_of_interest:
+            print("error: no blocks of specified colors")
+            return
+        
         nearest_block = min(blocks_of_interest, key=lambda b: (self.localizer.pose2d[0]-b[0])**2+(self.localizer.pose2d[1]-b[1])**2)
 
-        diff = nearest_block[0:2] - self.localizer.pose2d[0:2]
-        diff = diff / np.linalg.norm(diff)
+        self.plan_motion(nearest_block, self.block_r)
 
-        goal_pos = nearest_block[0:2] - (self.block_r+self.robot_r+0.3) * diff
-
-        self.plan_motion(goal_pos, np.arctan2(diff[1], diff[0]))
 
     def go_to_station(self, station_idx):
 
@@ -115,30 +118,59 @@ class MotionPlanner():
 
         station_pos = self.station_locations[station_idx]
 
-        diff = station_pos[0:2] - self.localizer.pose2d[0:2]
-        diff = diff / np.linalg.norm(diff)
-
-        goal_pos = station_pos[0:2] - (self.block_r+self.robot_r+0.1) * diff
-
-        self.plan_motion(goal_pos, np.arctan2(diff[1], diff[0]))
+        self.plan_motion(station_pos[0:2], station_pos[2])
 
 
-    def plan_motion(self, goal_pos, final_heading):
+    def plan_motion(self, target_pos, target_r):
 
-        # plan and try to avoid known blocks
-        field = np.ones((self.grid_length, self.grid_length),dtype=np.int_)
+        # build occupancy mask, avoiding stations and known blocks
+
+        graph = np.full((self.grid_length, self.grid_length), 0xffffffff, dtype=np.uint32)
         
         for x,y,_ in [b for v in self.blocks.values() for b in v]:
-            
-            field[((self.grid_x - x)**2 + (self.grid_y-y)**2) >= (self.block_r+self.robot_r)**2] = BIG_NUMBER
+
+            graph[((self.grid_x - x)**2 + (self.grid_y - y)**2) <= (self.block_r+self.robot_r+self.robot_avoid_buffer)**2] = 0
 
         for x,y,r in self.station_locations:
 
-            field[((self.grid_x - x)**2 + (self.grid_y-y)**2) >= (r+self.robot_r)**2] = BIG_NUMBER
+            graph[((self.grid_x - x)**2 + (self.grid_y - y)**2) <= (r+self.robot_r+self.robot_avoid_buffer)**2] = 0
 
-        path = dijkstra3d.dijkstra(field, self.pose_to_idx(*self.localizer.pose2d[0:2]), self.pose_to_idx(goal_pos[0], goal_pos[1]))
+        graph[((self.grid_x - target_pos[0])**2 + (self.grid_y - target_pos[1])**2) <= (target_r+self.robot_r+self.robot_stop_buffer)**2] = 0xffffffff
+
+        plt.imshow(graph, origin='lower')
+        plt.title('occupancy mask')
+        plt.show()
+
+        # equal weights except for disk around target pos, so shortest path can approach from any side
+
+        field = np.ones(graph.shape)
+        field[((self.grid_x - target_pos[0])**2 + (self.grid_y - target_pos[1])**2) <= (target_r+self.robot_r+self.robot_stop_buffer)**2] = 0
+
+        # run dijkstra
+
+        path = dijkstra3d.dijkstra(
+            field,
+            self.pose_to_idx(*self.localizer.pose2d[0:2]),
+            self.pose_to_idx(target_pos[0], target_pos[1]),
+            voxel_graph=graph.T,
+            connectivity=8,
+        )
+
+        if len(path) == 0:
+            print("error: no feasible path found")
+            return
 
         path_x, path_y = self.idx_to_pose(path[:,0], path[:,1])
+
+        mask = ((path_x - target_pos[0])**2 + (path_y - target_pos[1])**2) >= (self.block_r+self.robot_r+self.robot_stop_buffer)**2 
+
+        path_x, path_y = path_x[mask], path_y[mask]
+
+        diff = target_pos[0:2] - np.array([path_x[-1], path_y[-1]])
+
+        final_heading = np.arctan2(diff[1], diff[0])
+
+        # display path
 
         plt.plot(path_x, path_y)
         t = np.linspace(0,2*np.pi,100)
@@ -147,12 +179,17 @@ class MotionPlanner():
             plt.plot(x+r*np.cos(t),y+r*np.sin(t), color='gray', ls='--')
         for c,(x,y,_) in [(k,b) for k,v in self.blocks.items() for b in v]:
             plt.scatter(x,y,color=c,zorder=4)
+        plt.gca().axis('equal')
+        plt.title('planned path')
         plt.show()
 
         print(path_x, path_y)
         
+        # call path following service
+
         self.abs_path_service(path_x.astype(np.float32), path_y.astype(np.float32), final_heading)
         self.state = MotionPlannerState.EXECUTING
+
 
     def traj_follower_idle_callback(self, data):
         if data.data:
