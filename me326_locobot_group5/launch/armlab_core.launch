@@ -22,4 +22,7 @@
     <remap from="/vrpn_client_node/locobot_3/pose"
     to="camera_frame/mavros/vision_pose/pose" /> -->
     </node>
+
+    <node type="map_to_base_footprint.py" name="map_to_base_footprint" pkg="me326_locobot_group5" respawn="false" output="screen" />
+
 </launch>

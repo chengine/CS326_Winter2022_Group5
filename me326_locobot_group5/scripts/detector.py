@@ -254,43 +254,37 @@ class BlockDetectors(object):
 						# pc, indexes = pc.remove_statistical_outlier(10, .1)
 
 						# Retrieve oriented bounding box and find the center
-						try: 
-							BB = pcd_inter.get_oriented_bounding_box()
-							bounding_box_center = np.array(BB.center)
+						# try: 
+						# 	BB = pcd_inter.get_oriented_bounding_box()
+						# 	bounding_box_center = np.array(BB.center)
 
-							box_pts = np.array(BB.get_box_points())
+						# 	box_pts = np.array(BB.get_box_points())
 						
-							if bounding_box_center[-1] < 0.02 and BB.volume() < 0.03**2 and BB.volume() > 0.01**2: 	# Prevents finding spurious points
-								center = bounding_box_center
-								block_centers.append(center)
-						except:
-							continue
+						# 	if bounding_box_center[-1] < 0.02 and BB.volume() < 0.03**2 and BB.volume() > 0.01**2: 	# Prevents finding spurious points
+						# 		center = bounding_box_center
+						# 		block_centers.append(center)
+						# except:
+						# 	continue
 
 						# block_centers.append(np.mean(np.array(pcd_inter.points),axis=0))
 
-						# block_var = np.var(np.array(pc_new.points), axis=0)
+						block_var = np.var(np.array(pcd_inter.points), axis=0)
 
-						# if not np.any(block_var > 0.2):
-							# center = np.mean(np.array(pc_new.points), axis=0)
-							# block_centers.append(center)
+						if not np.any(block_var > 0.05):
+							center = np.mean(np.array(pcd_inter.points), axis=0)
+							block_centers.append(center)
+						
 				block_centers = np.array(block_centers)
 				self.camera_cube_locator_marker_gen(block_centers, color=c, header=self.depth_header)
 	
 		# Publish masked img
-		filter_img = cv2.bitwise_and(self.color_img, self.color_img, mask=mask_full)
+		filter_img = cv2.bitwise_and(self.color_img, self.color_img, mask=mask_full.astype(np.uint8))
 		filter_img_msg = self.bridge.cv2_to_imgmsg(filter_img, "rgb8")
-		self.filt_img_blocks.pub(filter_img_msg)
+		self.filt_img_blocks.publish(filter_img_msg)
 
 
 	def run(self):
 
-		if self.robot_type == "sim":
-			self.info_sub = rospy.Subscriber('/locobot/camera/color/camera_info', CameraInfo, self.info_callback)
-			self.color_image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
-			self.depth_image_sub = rospy.Subscriber("/locobot/camera/aligned_depth_to_color/image_raw", Image, self.depth_image_callback)
-
-		else:
-			self.info_sub = rospy.Subscriber('/locobot/camera/depth/camera_info', CameraInfo, self.info_callback)
-			self.color_image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
-			self.depth_image_sub = rospy.Subscriber("/locobot/camera/depth/image_rect_raw", Image, self.depth_image_callback)
-
+		self.info_sub = rospy.Subscriber('/locobot/camera/color/camera_info', CameraInfo, self.info_callback)
+		self.color_image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
+		self.depth_image_sub = rospy.Subscriber("/locobot/camera/aligned_depth_to_color/image_raw", Image, self.depth_image_callback)

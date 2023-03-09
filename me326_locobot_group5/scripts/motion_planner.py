@@ -105,7 +105,7 @@ class MotionPlanner():
         diff = nearest_block[0:2] - self.localizer.pose2d[0:2]
         diff = diff / np.linalg.norm(diff)
 
-        goal_pos = nearest_block[0:2] - (self.block_r+self.robot_r+0.1) * diff
+        goal_pos = nearest_block[0:2] - (self.block_r+self.robot_r+0.3) * diff
 
         self.plan_motion(goal_pos, np.arctan2(diff[1], diff[0]))
 
