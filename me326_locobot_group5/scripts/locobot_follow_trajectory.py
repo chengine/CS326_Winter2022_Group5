@@ -129,9 +129,14 @@ class TrajectoryFollower(object):
             poses=[PoseStamped(pose=Pose(position=Point(x=i[0], y=i[1]))) for i in path]
         )
 
+        poses = []
+        for t in np.linspace(0, self.t_final, 100):
+            traj_pt = self.traj(t)
+            poses += [PoseStamped(pose=Pose(position=Point(x=traj_pt[0], y=traj_pt[1])))]
+
         self.traj_msg = Path(
             header=Header(frame_id=self.frame_id),
-            poses=[PoseStamped(pose=Pose(position=Point(x=(traj_pt := self.traj(t))[0], y=traj_pt[1]))) for t in np.linspace(0, self.t_final, 100)]
+            poses= poses #[PoseStamped(pose=Pose(position=Point(x=(traj_pt := self.traj(t))[0], y=traj_pt[1]))) for t in np.linspace(0, self.t_final, 100)]
         )
 
         self.transition_state(TrajectoryFollowerState.TURN_TO_START)

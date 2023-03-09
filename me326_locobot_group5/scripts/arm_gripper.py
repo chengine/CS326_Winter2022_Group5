@@ -58,11 +58,16 @@ class MoveLocobotArm(object):
 		pose_msg = req.pose
 		pos = (pose_msg.position.x, pose_msg.position.y, pose_msg.position.z)
 
+		print('Homing')
 		self.move_arm_to_home()
+		print('Opening Gripper')
 		self.open_gripper()
+		print('Moving Down to Grasp')
 		self.move_gripper_down_to_grasp(position=pos)
+		print('Closing Gripper')
 		self.close_gripper()
-		self.move_arm_to_home()
+		print('Homing')
+		self.move_arm_down_for_camera()
 
 		return {}
 		
@@ -145,7 +150,7 @@ class MoveLocobotArm(object):
 
 		pose_goal.position.x = position[0]
 		pose_goal.position.y = position[1]
-		pose_goal.position.z = 0.01
+		pose_goal.position.z = 0.03
 
 		v = np.matrix([0,1,0]) #pitch about y-axis
 		th = 90*np.pi/180. #pitch by 45deg
