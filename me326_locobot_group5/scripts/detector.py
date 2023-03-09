@@ -189,29 +189,18 @@ class BlockDetectors(object):
 			# remove any spurious data
 			data = data[~np.isnan(data).any(axis=-1)]
 
+			if len(data) == 0:
+				continue
+
 			# Transform point cloud from camera frame into world frame
 			transform = self.tf_buffer.lookup_transform(self.frame_id, self.depth_header.frame_id, rospy.Time(), rospy.Duration(3.0))
 			pcd = create_pc_from_points(data[:, :3], self.depth_header.frame_id)
 			pcd_world = do_transform_cloud(pcd, transform)
 			pcd_world = np.array(list(point_cloud2.read_points(pcd_world, skip_nans=True, field_names = ("x", "y", "z"))))
 
-			# print(pcd_world)
-			# exit()
-			# pcd_world = ros_numpy.numpify(pcd_world)
-			# point_cloud2.read_points_list(pcd_world)
-			# point_cloud2.
-
 			points = pcd_world
 
-			# points[:, 0] = pcd_world['x']
-			# points[:, 1] = pcd_world['y']
-			# points[:, 2] = pcd_world['z']
-
 			# Rotated colored point cloud
-
-			if len(points) == 0:
-				continue
-			
 			data[:, :3] = points
 
 			if len(data) > 0:
@@ -257,18 +246,19 @@ class BlockDetectors(object):
 						# pc, indexes = pc.remove_statistical_outlier(10, .1)
 
 						# Retrieve oriented bounding box and find the center
-						# BB = pcd_inter.get_oriented_bounding_box()
-						# bounding_box_center = np.array(BB.center)
+						try: 
+							BB = pcd_inter.get_oriented_bounding_box()
+							bounding_box_center = np.array(BB.center)
 
-						# box_pts = np.array(BB.get_box_points())
+							box_pts = np.array(BB.get_box_points())
 						
-						# # TODO: Get the pose
+							if bounding_box_center[-1] < 0.02 and BB.volume() < 0.03**2 and BB.volume() > 0.01**2: 	# Prevents finding spurious points
+								center = bounding_box_center
+								block_centers.append(center)
+						except:
+							continue
 
-						# if bounding_box_center[-1] < 0.02 and BB.volume() < 0.03**2 and BB.volume() > 0.01**2: 	# Prevents finding spurious points
-						# 	center = bounding_box_center
-						# 	block_centers.append(center)
-
-						block_centers.append(np.mean(np.array(pcd_inter.points),axis=0))
+						# block_centers.append(np.mean(np.array(pcd_inter.points),axis=0))
 
 						# block_var = np.var(np.array(pc_new.points), axis=0)
 
