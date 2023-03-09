@@ -4,6 +4,7 @@ import open3d as o3d
 # import ros_numpy
 from utils import mask_grid
 
+import cv2
 from cv_bridge import CvBridge
 import rospy
 import tf
@@ -53,6 +54,8 @@ class BlockDetectors(object):
 		self.camera_cube_locator_markers_b = rospy.Publisher("/locobot/blocks/visual_b", MarkerArray, queue_size=1)
 		self.camera_cube_locator_markers_y = rospy.Publisher("/locobot/blocks/visual_y", MarkerArray, queue_size=1)
 		self.imgs_with_blocks_bb = rospy.Publisher("/locobot/blocks/bounding_box", Image, queue_size=1, latch=True)
+
+		self.filt_img_blocks = rospy.Publisher("/locobot/blocks/filter_img", Image, queue_size=1, latch=True)
 
 		# self.bridge.cv2_to_imgmsg(mask_img, "rgb8")
 
@@ -180,11 +183,16 @@ class BlockDetectors(object):
 		rgb[..., 1] = self.color_img[..., 1]
 		rgb[..., 2] = self.color_img[..., 2]
 
+		mask_full = np.zeros((height, width), dtype=bool)
+
 		for c in self.block_colors:
 			# Mask out the image, leaving only the salient points in the camera frame that correspond to the right block color
-			masked_img, masked_xyz = mask_grid(rgb.astype(np.uint8), depth_image, meshgrid, self.camera_model, color_mask=c)
+			masked_img, masked_xyz, mask = mask_grid(rgb.astype(np.uint8), depth_image, meshgrid, self.camera_model, color_mask=c)
 			data = np.concatenate([masked_xyz, masked_img], axis=-1)
 			data[:, 3:] = data[:, 3:]/255.
+
+			# Compose masks
+			mask_full = np.logical_or(mask_full, np.array(mask))
 
 			# remove any spurious data
 			data = data[~np.isnan(data).any(axis=-1)]
@@ -268,6 +276,12 @@ class BlockDetectors(object):
 				block_centers = np.array(block_centers)
 				self.camera_cube_locator_marker_gen(block_centers, color=c, header=self.depth_header)
 	
+		# Publish masked img
+		filter_img = cv2.bitwise_and(self.color_img, self.color_img, mask=mask_full)
+		filter_img_msg = self.bridge.cv2_to_imgmsg(filter_img, "rgb8")
+		self.filt_img_blocks.pub(filter_img_msg)
+
+
 	def run(self):
 
 		if self.robot_type == "sim":

@@ -79,4 +79,4 @@ def mask_grid(color_img, depth_img, meshgrid, camera, color_mask='r'):
 
     mask_xyz = mask_depth[..., None] * rays
 
-    return mask_img, mask_xyz
+    return mask_img, mask_xyz, mask
