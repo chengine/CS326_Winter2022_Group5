@@ -24,9 +24,9 @@ class PickNPlace():
 
 		self.detector = BlockDetectors()
 
-		self.cam_orient_obj = OrientCamera  
-		self.move_to_grasp_service = rospy.ServiceProxy('/arm_gripper/grab', GrabBlock)
-		self.arm_modes_service = rospy.ServiceProxy('/arm_gripper/modes', Modes)
+		self.cam_orient_obj = OrientCamera()
+		# self.move_to_grasp_service = rospy.ServiceProxy('/arm_gripper/grab', GrabBlock)
+		# self.arm_modes_service = rospy.ServiceProxy('/arm_gripper/modes', Modes)
 
 		self.possible_colors = ['r', 'g', 'b', 'y']
 
@@ -129,6 +129,13 @@ class PickNPlace():
 		# Computes the euclidian distance between the data and the new data and 
 		# sees which ones are redundant
 
+		if len(new_data) == 0:
+			return data
+		
+		print("DATA SHAPE: ", data.shape)
+		print("NEW DATA SHAPE: ", new_data.shape)
+
+		
 		distance_matrix = scipy.spatial.distance_matrix(data, new_data)
 
 		# If a new data point has no matches (i.e. the column corresponding to it has no hits), we
@@ -139,6 +146,7 @@ class PickNPlace():
 		hits = np.sum(binary_mask, axis=0)
 
 		new_data_indices = np.argwhere(hits == 0)
+		print("new_data_indices shape: ", new_data_indices.shape)
 
 		new_data_to_append = new_data[new_data_indices]
 
@@ -154,22 +162,22 @@ class PickNPlace():
 
 		# TODO: Pick up the block
 		# TODO: Get the pose of the block in the base link frame!
-		blocks_of_interest = [b for c in colors for b in self.blocks[c]]
-		nearest_block = min(blocks_of_interest, key=lambda b: (self.localizer.pose2d[0]-b[0])**2+(self.localizer.pose2d[1]-b[1])**2)
+		# blocks_of_interest = [b for c in colors for b in self.blocks[c]]
+		# nearest_block = min(blocks_of_interest, key=lambda b: (self.localizer.pose2d[0]-b[0])**2+(self.localizer.pose2d[1]-b[1])**2)
 
-		point_3d_geom_msg = Point()
-		point_3d_geom_msg.header = 'locobot/odom'
-		point_3d_geom_msg.point.x = nearest_block[0]
-		point_3d_geom_msg.point.y = nearest_block[1]
-		point_3d_geom_msg.point.z = 0.03
-		block_in_base_link_frame = self.listener.transformPoint('locobot/base_link', point_3d_geom_msg)
+		# point_3d_geom_msg = Point()
+		# point_3d_geom_msg.header = 'locobot/odom'
+		# point_3d_geom_msg.point.x = nearest_block[0]
+		# point_3d_geom_msg.point.y = nearest_block[1]
+		# point_3d_geom_msg.point.z = 0.03
+		# block_in_base_link_frame = self.listener.transformPoint('locobot/base_link', point_3d_geom_msg)
 
-		block_pose = Pose()
-		block_pose.position.x = block_in_base_link_frame.point.x
-		block_pose.position.y = block_in_base_link_frame.point.y
-		block_pose.position.z = block_in_base_link_frame.point.z
+		# block_pose = Pose()
+		# block_pose.position.x = block_in_base_link_frame.point.x
+		# block_pose.position.y = block_in_base_link_frame.point.y
+		# block_pose.position.z = block_in_base_link_frame.point.z
 
-		self.move_to_grasp_service(block_pose)
+		# self.move_to_grasp_service(block_pose)
 
 	def go_to_station(self, station_idx):
 

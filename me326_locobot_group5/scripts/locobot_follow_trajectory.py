@@ -88,7 +88,7 @@ class TrajectoryFollower(object):
         # set up controllers
         self.ramsete = Ramsete(b=2.0, zeta=0.8)
         self.pose_controller = PoseController(k1=0.4, k2=0.8, k3=0.8)
-        self.heading_kP = 1.0
+        self.heading_kP = 2.5
         self.traj_complete_thresh = 0.2 # m
         self.at_pose_thresh = 0.05 # m
         self.at_heading_thresh = np.radians(2) # deg

@@ -12,9 +12,9 @@ from geometry_msgs.msg import Pose, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from sensor_msgs.msg import Image, CameraInfo
 from image_geometry import PinholeCameraModel
-import ros_numpy
+# import ros_numpy
 
-from std_msgs import Header
+from std_msgs.msg import Header
 import sensor_msgs.point_cloud2 as point_cloud2
 import tf2_ros
 import tf2_py as tf2
@@ -22,15 +22,17 @@ from sensor_msgs.msg import PointCloud2, PointField
 from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
 
 def create_pc_from_points(points, id):
-    fields = [PointField('x', 0, PointField.FLOAT32, 1),
-              PointField('y', 4, PointField.FLOAT32, 1),
-              PointField('z', 8, PointField.FLOAT32, 1)]
+	fields = [PointField('x', 0, PointField.FLOAT32, 1),
+			  PointField('y', 4, PointField.FLOAT32, 1),
+			  PointField('z', 8, PointField.FLOAT32, 1)]
 
-    header = Header()
-    header.frame_id = id
-    header.stamp = rospy.Time.now()
+	header = Header()
+	header.frame_id = id
+	header.stamp = rospy.Time.now()
 
-    pc2 = point_cloud2.create_cloud(header, fields, points)
+	pc2 = point_cloud2.create_cloud(header, fields, points)
+	
+	return pc2
 
 class BlockDetectors(object):
 	"""docstring for BlockDetector"""
@@ -87,7 +89,11 @@ class BlockDetectors(object):
 	def depth_image_callback(self,depth_msg):
 		# Data is PointCloud2 msg
 		self.depth_header = depth_msg.header
-		self.depth_img = np.frombuffer(depth_msg.data, dtype=np.float32).reshape(depth_msg.height, depth_msg.width, -1)
+		if self.robot_type == "sim":
+			self.depth_img = np.frombuffer(depth_msg.data, dtype=np.float32).reshape(depth_msg.height, depth_msg.width, -1)
+		else:
+			self.depth_img = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding="passthrough")
+			self.depth_img = self.depth_img / 1000
 
 	def camera_cube_locator_marker_gen(self, block_positions, color='r', header=None):
 		block_markers = MarkerArray()
@@ -95,11 +101,11 @@ class BlockDetectors(object):
 		marks = []
 		for ind, block_xyz in enumerate(block_positions):		
 			point_3d_geom_msg = PointStamped()
-			point_3d_geom_msg.header = 'locobot/odom' # header	# TODO: Change this back to header if needed
+			point_3d_geom_msg.header = self.frame_id
 			point_3d_geom_msg.point.x = block_xyz[0]
 			point_3d_geom_msg.point.y = block_xyz[1]
 			point_3d_geom_msg.point.z = block_xyz[2]
-			rotated_points = self.listener.transformPoint(self.frame_id, point_3d_geom_msg)
+			rotated_points = point_3d_geom_msg # self.listener.transformPoint(self.frame_id, point_3d_geom_msg)
 
 			if abs(rotated_points.point.z) > 0.1 :
 				continue
@@ -184,18 +190,28 @@ class BlockDetectors(object):
 			data = data[~np.isnan(data).any(axis=-1)]
 
 			# Transform point cloud from camera frame into world frame
-			transform = self.tf_buffer.lookup_transform("locobot/odom", depth_image.header, rospy.Time())
-			pcd = create_pc_from_points(data[:, :3], depth_image.header)
+			transform = self.tf_buffer.lookup_transform(self.frame_id, self.depth_header.frame_id, rospy.Time(), rospy.Duration(3.0))
+			pcd = create_pc_from_points(data[:, :3], self.depth_header.frame_id)
 			pcd_world = do_transform_cloud(pcd, transform)
-			pcd_world = ros_numpy.numpify(pcd_world)
+			pcd_world = np.array(list(point_cloud2.read_points(pcd_world, skip_nans=True, field_names = ("x", "y", "z"))))
 
-			points = np.zeros(data[:, :3].shape)
+			# print(pcd_world)
+			# exit()
+			# pcd_world = ros_numpy.numpify(pcd_world)
+			# point_cloud2.read_points_list(pcd_world)
+			# point_cloud2.
 
-			points[:, 0] = pcd_world['x']
-			points[:, 1] = pcd_world['y']
-			points[:, 2] = pcd_world['z']
+			points = pcd_world
+
+			# points[:, 0] = pcd_world['x']
+			# points[:, 1] = pcd_world['y']
+			# points[:, 2] = pcd_world['z']
 
 			# Rotated colored point cloud
+
+			if len(points) == 0:
+				continue
+			
 			data[:, :3] = points
 
 			if len(data) > 0:
@@ -241,16 +257,18 @@ class BlockDetectors(object):
 						# pc, indexes = pc.remove_statistical_outlier(10, .1)
 
 						# Retrieve oriented bounding box and find the center
-						BB = pcd_inter.get_oriented_bounding_box()
-						bounding_box_center = np.array(BB.center)
+						# BB = pcd_inter.get_oriented_bounding_box()
+						# bounding_box_center = np.array(BB.center)
 
-						box_pts = np.array(BB.get_box_points())
+						# box_pts = np.array(BB.get_box_points())
 						
-						# TODO: Get the pose
+						# # TODO: Get the pose
 
-						if bounding_box_center[-1] < 0.02 and BB.volume() < 0.03**2 and BB.volume() > 0.01**2: 	# Prevents finding spurious points
-							center = bounding_box_center
-							block_centers.append(center)
+						# if bounding_box_center[-1] < 0.02 and BB.volume() < 0.03**2 and BB.volume() > 0.01**2: 	# Prevents finding spurious points
+						# 	center = bounding_box_center
+						# 	block_centers.append(center)
+
+						block_centers.append(np.mean(np.array(pcd_inter.points),axis=0))
 
 						# block_var = np.var(np.array(pc_new.points), axis=0)
 
@@ -262,7 +280,13 @@ class BlockDetectors(object):
 	
 	def run(self):
 
-		self.info_sub = rospy.Subscriber('/locobot/camera/color/camera_info', CameraInfo, self.info_callback)
-		self.color_image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
-		self.depth_image_sub = rospy.Subscriber("/locobot/camera/aligned_depth_to_color/image_raw", Image, self.depth_image_callback)
+		if self.robot_type == "sim":
+			self.info_sub = rospy.Subscriber('/locobot/camera/color/camera_info', CameraInfo, self.info_callback)
+			self.color_image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
+			self.depth_image_sub = rospy.Subscriber("/locobot/camera/aligned_depth_to_color/image_raw", Image, self.depth_image_callback)
+
+		else:
+			self.info_sub = rospy.Subscriber('/locobot/camera/depth/camera_info', CameraInfo, self.info_callback)
+			self.color_image_sub = rospy.Subscriber('/locobot/camera/color/image_raw', Image, self.color_image_callback)
+			self.depth_image_sub = rospy.Subscriber("/locobot/camera/depth/image_rect_raw", Image, self.depth_image_callback)
 
