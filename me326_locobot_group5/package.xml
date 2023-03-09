@@ -21,6 +21,7 @@
   <depend>tf</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
+  <depend>tf2_sensor_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>tf_conversions</depend>
   <depend>eigen_conversions</depend>
@@ -35,8 +36,6 @@
   <depend>image_transport</depend>
   <depend>cv_bridge</depend>
   <depend>ros_numpy</depend>
-
-  
   
   <exec_depend>message_runtime</exec_depend>
 

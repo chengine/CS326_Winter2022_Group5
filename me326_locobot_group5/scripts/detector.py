@@ -10,13 +10,27 @@ import tf
 
 from geometry_msgs.msg import Pose, PointStamped
 from visualization_msgs.msg import Marker, MarkerArray
-
-import sensor_msgs.point_cloud2 as pc2
 from sensor_msgs.msg import Image, CameraInfo
-from sensor_msgs.msg import PointCloud2
-from sensor_msgs import point_cloud2
 from image_geometry import PinholeCameraModel
+import ros_numpy
 
+from std_msgs import Header
+import sensor_msgs.point_cloud2 as point_cloud2
+import tf2_ros
+import tf2_py as tf2
+from sensor_msgs.msg import PointCloud2, PointField
+from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
+
+def create_pc_from_points(points, id):
+    fields = [PointField('x', 0, PointField.FLOAT32, 1),
+              PointField('y', 4, PointField.FLOAT32, 1),
+              PointField('z', 8, PointField.FLOAT32, 1)]
+
+    header = Header()
+    header.frame_id = id
+    header.stamp = rospy.Time.now()
+
+    pc2 = point_cloud2.create_cloud(header, fields, points)
 
 class BlockDetectors(object):
 	"""docstring for BlockDetector"""
@@ -27,6 +41,9 @@ class BlockDetectors(object):
 		self.camera_cube_locator_markers_g = rospy.Publisher("/locobot/blocks/visual_g", MarkerArray, queue_size=1)
 		self.camera_cube_locator_markers_b = rospy.Publisher("/locobot/blocks/visual_b", MarkerArray, queue_size=1)
 		self.camera_cube_locator_markers_y = rospy.Publisher("/locobot/blocks/visual_y", MarkerArray, queue_size=1)
+		self.imgs_with_blocks_bb = rospy.Publisher("/locobot/blocks/bounding_box", Image, queue_size=1, latch=True)
+
+		# self.bridge.cv2_to_imgmsg(mask_img, "rgb8")
 
 		self.block_colors = block_colors
 
@@ -37,7 +54,8 @@ class BlockDetectors(object):
 			'y': MarkerArray()
 		}
 		# create a tf listener
-		self.listener = tf.TransformListener()
+		self.tf_buffer = tf2_ros.Buffer()
+		self.listener = tf2_ros.TransformListener(self.tf_buffer)
 
 		self.camera_model = None
 		self.color_img = None
@@ -68,7 +86,7 @@ class BlockDetectors(object):
 		marks = []
 		for ind, block_xyz in enumerate(block_positions):		
 			point_3d_geom_msg = PointStamped()
-			point_3d_geom_msg.header = header
+			point_3d_geom_msg.header = 'locobot/odom' # header	# TODO: Change this back to header if needed
 			point_3d_geom_msg.point.x = block_xyz[0]
 			point_3d_geom_msg.point.y = block_xyz[1]
 			point_3d_geom_msg.point.z = block_xyz[2]
@@ -148,18 +166,38 @@ class BlockDetectors(object):
 		rgb[..., 2] = self.color_img[..., 2]
 
 		for c in self.block_colors:
+			# Mask out the image, leaving only the salient points in the camera frame that correspond to the right block color
 			masked_img, masked_xyz = mask_grid(rgb.astype(np.uint8), depth_image, meshgrid, self.camera_model, color_mask=c)
 			data = np.concatenate([masked_xyz, masked_img], axis=-1)
 			data[:, 3:] = data[:, 3:]/255.
 
+			# remove any spurious data
 			data = data[~np.isnan(data).any(axis=-1)]
 
+			# Transform point cloud from camera frame into world frame
+			transform = self.tf_buffer.lookup_transform("locobot/odom", depth_image.header, rospy.Time())
+			pcd = create_pc_from_points(data[:, :3], depth_image.header)
+			pcd_world = do_transform_cloud(pcd, transform)
+			pcd_world = ros_numpy.numpify(pcd_world)
+
+			points = np.zeros(data[:, :3].shape)
+
+			points[:, 0] = pcd_world['x']
+			points[:, 1] = pcd_world['y']
+			points[:, 2] = pcd_world['z']
+
+			# Rotated colored point cloud
+			data[:, :3] = points
+
 			if len(data) > 0:
+
+				# Create the Open3D Point Cloud
 				pc = o3d.geometry.PointCloud()
 
 				pc.points = o3d.utility.Vector3dVector(data[:, :3])
 				pc.colors = o3d.utility.Vector3dVector(data[:, 3:])
 
+				# Cluster the blocks if more than one block in image
 				pc_ind = np.array(pc.cluster_dbscan(.1, 5))
 				def partition(array):
 					return {i: (array == i).nonzero()[0] for i in np.unique(array)}
@@ -168,22 +206,48 @@ class BlockDetectors(object):
 				
 				block_centers = []
 				for key, value in pc_ind_dict.items():
+					# If the cluster is not an outlier
 					if key != -1:
 						pc_new = pc.select_by_index(value)
 
+						# Interpolate from these points down to the floor to get the rough
+						# point cloud of the whole block
+						pc_pts = np.array(pc_new.points)
+
+						# Interpolate in the z-direction (i.e. down to the floor) for K points
+						pc_pts_interp_z = np.linspace(pc_pts[:, 2], np.zeros(pc_pts[:, 2].shape), 3).transpose(1, 0)
+						
+						# Create copies of the xy coordinates
+						pc_pts_interp_xy = np.stack(3*[pc_pts[:, :2]], axis=-1)
+
+						# Concatenate the two arrays together -> N x 3 x K
+						pc_pts_interp_xyz = np.concatenate([pc_pts_interp_xy, pc_pts_interp_z[:, None, :]], axis=1)
+						
+						# N x K x 3 -> N*K x 3
+						pc_pts_inter = pc_pts_interp_xyz.transpose(0, 2, 1).reshape(-1, 3)
+						
+						# Create another point cloud
+						pcd_inter = o3d.geometry.PointCloud()
+						pcd_inter.points = o3d.utility.Vector3dVector(pc_pts_inter[:, :3])
 						# pc, indexes = pc.remove_statistical_outlier(10, .1)
-						# BB = pc_new.get_oriented_bounding_box()
 
-						# bounding_box_center = np.array(BB.center)
+						# Retrieve oriented bounding box and find the center
+						BB = pcd_inter.get_oriented_bounding_box()
+						bounding_box_center = np.array(BB.center)
 
-						# if bounding_box_center[-1] > 0.5 and BB.volume() < 0.4**2 and BB.volume() > 0.05**2: 	# Prevents finding spurious points
-						# 	print(c, BB.volume())
+						box_pts = np.array(BB.get_box_points())
+						
+						# TODO: Get the pose
 
-						block_var = np.var(np.array(pc_new.points), axis=0)
-
-						if not np.any(block_var > 0.2):
-							center = np.mean(np.array(pc_new.points), axis=0)
+						if bounding_box_center[-1] < 0.02 and BB.volume() < 0.03**2 and BB.volume() > 0.01**2: 	# Prevents finding spurious points
+							center = bounding_box_center
 							block_centers.append(center)
+
+						# block_var = np.var(np.array(pc_new.points), axis=0)
+
+						# if not np.any(block_var > 0.2):
+							# center = np.mean(np.array(pc_new.points), axis=0)
+							# block_centers.append(center)
 				block_centers = np.array(block_centers)
 				self.camera_cube_locator_marker_gen(block_centers, color=c, header=self.depth_header)
 	
