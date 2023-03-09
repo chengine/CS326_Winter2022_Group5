@@ -13,6 +13,7 @@
   <group ns="locobot">
     <node type="decision_making.py" name="decision_making" pkg="me326_locobot_group5" respawn="false" output="screen" />
     <node type="locobot_follow_trajectory.py" name="locobot_follow_trajectory" pkg="me326_locobot_group5" respawn="false" output="screen" launch-prefix="gnome-terminal -x"/>
+    <node type="map_to_base_footprint.py" name="map_to_base_footprint" pkg="me326_locobot_group5" respawn="false" output="screen" />
   </group>
   
 </launch>
