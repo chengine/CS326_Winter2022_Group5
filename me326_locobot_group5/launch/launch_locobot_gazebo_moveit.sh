@@ -7,6 +7,3 @@ rosservice call /gazebo/unpause_physics
 
 sleep 5
 rosrun me326_locobot_group5 spawn_cubes.py
-# gnome-terminal -x roslaunch me326_locobot_group5 gazebo_moveit_example.launch 
-
-
