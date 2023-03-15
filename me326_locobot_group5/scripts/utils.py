@@ -24,6 +24,17 @@ def projectPixelTo3d(camera, us, vs):
     z = np.ones(x.shape)
     return np.stack([x, y, z], axis=-1)
 
+def project3dToPixel(camera, points_in_cam_frame):
+    normalize_pts = points_in_cam_frame / points_in_cam_frame[:, -1][:, None]
+
+    x = normalize_pts[:, 0]
+    y = normalize_pts[:, 1]
+
+    us = x*np.array(camera.fx()) + np.array(camera.cx())
+    vs = y*np.array(camera.fy()) + np.array(camera.cy())
+
+    return np.round(np.stack([us, vs], axis=-1))
+
 def mask_grid(color_img, depth_img, meshgrid, camera, color_mask='r'):
     """Returns the black and white image with a color-mask for the specified color (white or the color where the color is, black everywhere else)
     
@@ -80,3 +91,93 @@ def mask_grid(color_img, depth_img, meshgrid, camera, color_mask='r'):
     mask_xyz = mask_depth[..., None] * rays
 
     return mask_img, mask_xyz, mask
+
+### ROS Transform Utils
+import tf.transformations as tr
+
+from geometry_msgs.msg import Point
+from geometry_msgs.msg import Pose
+from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Quaternion
+from geometry_msgs.msg import Transform
+from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import Vector3
+
+def pose_to_pq(msg):
+    """Convert a C{geometry_msgs/Pose} into position/quaternion np arrays
+
+    @param msg: ROS message to be converted
+    @return:
+      - p: position as a np.array
+      - q: quaternion as a numpy array (order = [x,y,z,w])
+    """
+    p = np.array([msg.position.x, msg.position.y, msg.position.z])
+    q = np.array([msg.orientation.x, msg.orientation.y,
+                  msg.orientation.z, msg.orientation.w])
+    return p, q
+
+
+def pose_stamped_to_pq(msg):
+    """Convert a C{geometry_msgs/PoseStamped} into position/quaternion np arrays
+
+    @param msg: ROS message to be converted
+    @return:
+      - p: position as a np.array
+      - q: quaternion as a numpy array (order = [x,y,z,w])
+    """
+    return pose_to_pq(msg.pose)
+
+
+def transform_to_pq(msg):
+    """Convert a C{geometry_msgs/Transform} into position/quaternion np arrays
+
+    @param msg: ROS message to be converted
+    @return:
+      - p: position as a np.array
+      - q: quaternion as a numpy array (order = [x,y,z,w])
+    """
+    p = np.array([msg.translation.x, msg.translation.y, msg.translation.z])
+    q = np.array([msg.rotation.x, msg.rotation.y,
+                  msg.rotation.z, msg.rotation.w])
+    return p, q
+
+
+def transform_stamped_to_pq(msg):
+    """Convert a C{geometry_msgs/TransformStamped} into position/quaternion np arrays
+
+    @param msg: ROS message to be converted
+    @return:
+      - p: position as a np.array
+      - q: quaternion as a numpy array (order = [x,y,z,w])
+    """
+    return transform_to_pq(msg.transform)
+
+
+def msg_to_se3(msg):
+    """Conversion from geometric ROS messages into SE(3)
+
+    @param msg: Message to transform. Acceptable types - C{geometry_msgs/Pose}, C{geometry_msgs/PoseStamped},
+    C{geometry_msgs/Transform}, or C{geometry_msgs/TransformStamped}
+    @return: a 4x4 SE(3) matrix as a numpy array
+    @note: Throws TypeError if we receive an incorrect type.
+    """
+    if isinstance(msg, Pose):
+        p, q = pose_to_pq(msg)
+    elif isinstance(msg, PoseStamped):
+        p, q = pose_stamped_to_pq(msg)
+    elif isinstance(msg, Transform):
+        p, q = transform_to_pq(msg)
+    elif isinstance(msg, TransformStamped):
+        p, q = transform_stamped_to_pq(msg)
+    else:
+        raise TypeError("Invalid type for conversion to SE(3)")
+    norm = np.linalg.norm(q)
+    if np.abs(norm - 1.0) > 1e-3:
+        raise ValueError(
+            "Received un-normalized quaternion (q = {0:s} ||q|| = {1:3.6f})".format(
+                str(q), np.linalg.norm(q)))
+    elif np.abs(norm - 1.0) > 1e-6:
+        q = q / norm
+    g = tr.quaternion_matrix(q)
+    g[0:3, -1] = p
+    return g

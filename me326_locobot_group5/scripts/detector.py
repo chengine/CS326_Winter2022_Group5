@@ -17,7 +17,9 @@ import sensor_msgs.point_cloud2 as point_cloud2
 import tf2_ros
 import tf2_py as tf2
 from sensor_msgs.msg import PointCloud2, PointField
-from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
+# from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
+
+from utils import msg_to_se3, project3dToPixel
 
 def create_pc_from_points(points, id):
 	fields = [PointField('x', 0, PointField.FLOAT32, 1),
@@ -172,6 +174,7 @@ class BlockDetectors(object):
 
 		mask_full = np.zeros((height, width), dtype=bool)
 
+		img = self.color_img
 		for c in self.block_colors:
 			# Mask out the image, leaving only the salient points in the camera frame that correspond to the right block color
 			masked_img, masked_xyz, mask = mask_grid(rgb.astype(np.uint8), depth_image, meshgrid, self.camera_model, color_mask=c)
@@ -189,9 +192,9 @@ class BlockDetectors(object):
 
 			# Transform point cloud from camera frame into world frame
 			transform = self.tf_buffer.lookup_transform(self.frame_id, self.depth_header.frame_id, rospy.Time(), rospy.Duration(3.0))
-			pcd = create_pc_from_points(data[:, :3], self.depth_header.frame_id)
-			pcd_world = do_transform_cloud(pcd, transform)
-			pcd_world = np.array(list(point_cloud2.read_points(pcd_world, skip_nans=True, field_names = ("x", "y", "z"))))
+			transform_matrix = msg_to_se3(transform)
+			pcd_world = data[:, :3]@transform_matrix[:3, :3].T + transform_matrix[:3, -1][None, :]
+			# pcd_world = np.array(list(point_cloud2.read_points(pcd_world, skip_nans=True, field_names = ("x", "y", "z"))))
 
 			points = pcd_world
 
@@ -207,7 +210,7 @@ class BlockDetectors(object):
 				pc.colors = o3d.utility.Vector3dVector(data[:, 3:])
 
 				# Cluster the blocks if more than one block in image
-				pc_ind = np.array(pc.cluster_dbscan(.1, 5))
+				pc_ind = np.array(pc.cluster_dbscan(.01, 5))
 				def partition(array):
 					return {i: (array == i).nonzero()[0] for i in np.unique(array)}
 				
@@ -241,25 +244,39 @@ class BlockDetectors(object):
 						# pc, indexes = pc.remove_statistical_outlier(10, .1)
 
 						# Retrieve oriented bounding box and find the center
-						# try: 
-						# 	BB = pcd_inter.get_oriented_bounding_box()
-						# 	bounding_box_center = np.array(BB.center)
+						BB = pcd_inter.get_oriented_bounding_box(robust=True)
+						bounding_box_center = np.array(BB.center)
 
-						# 	box_pts = np.array(BB.get_box_points())
-						
-						# 	if bounding_box_center[-1] < 0.02 and BB.volume() < 0.03**2 and BB.volume() > 0.01**2: 	# Prevents finding spurious points
-						# 		center = bounding_box_center
-						# 		block_centers.append(center)
-						# except:
-						# 	continue
+						box_pts = np.array(BB.get_box_points())
 
+						print(BB.volume())
+						if bounding_box_center[-1] < 0.02 and BB.volume() < 0.04**3 and BB.volume() > 0.01**3: 	# Prevents finding spurious points
+							center = bounding_box_center
+							block_centers.append(center)
+
+							# For visualization, plot BB on img plane
+							points_in_cam_frame = (box_pts - transform_matrix[:3, -1][None, :]) @ transform_matrix[:3, :3]
+							pixels = project3dToPixel(self.camera_model, points_in_cam_frame)
+							
+							for pix in pixels:
+								center = (int(pix[0]), int(pix[1]))
+								if c == 'r':
+									pt_col = (255, 0, 0)
+								elif c == 'b':
+									pt_col = (0, 0, 255)
+								elif c == 'g':
+									pt_col = (0, 255, 0)
+								elif c == 'y':
+									pt_col = (255, 255, 0)
+								img = cv2.circle(img, center, 1, pt_col, 2)
+	
 						# block_centers.append(np.mean(np.array(pcd_inter.points),axis=0))
 
-						block_var = np.var(np.array(pcd_inter.points), axis=0)
+						# block_var = np.var(np.array(pcd_inter.points), axis=0)
 
-						if not np.any(block_var > 0.05):
-							center = np.mean(np.array(pcd_inter.points), axis=0)
-							block_centers.append(center)
+						# if not np.any(block_var > 0.05):
+						# 	center = np.mean(np.array(pcd_inter.points), axis=0)
+						# 	block_centers.append(center)
 						
 				block_centers = np.array(block_centers)
 				self.camera_cube_locator_marker_gen(block_centers, color=c, header=self.depth_header)
@@ -269,6 +286,9 @@ class BlockDetectors(object):
 		filter_img_msg = self.bridge.cv2_to_imgmsg(filter_img, "rgb8")
 		self.filt_img_blocks.publish(filter_img_msg)
 
+		# Publish BB img
+		bb_img = self.bridge.cv2_to_imgmsg(img, "rgb8")
+		self.imgs_with_blocks_bb.publish(bb_img)
 
 	def run(self):
 
