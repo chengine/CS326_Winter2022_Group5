@@ -55,6 +55,7 @@ if __name__ == '__main__':
     }
 
     if robot_type == "physical":
+        print("starting map_to_base_footprint")
         rospy.Subscriber("/vrpn_client_node/" + robot_name + "/pose", PoseStamped, lambda data: mocap_callback(data, frame_offset))
     
     rospy.spin()

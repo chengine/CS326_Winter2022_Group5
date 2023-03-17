@@ -109,7 +109,7 @@ class PickNPlace():
 			# Rotate x degrees
 			self.spin(current_heading + (2*np.pi)/increments * (i+1))
 
-	def update_block_map(self, colors):
+	def update_block_map(self, colors, clear=False):
 
 		self.detector.calculate_tf()
 
@@ -130,7 +130,7 @@ class PickNPlace():
 
 			current_positions = self.blocks[col] 
 
-			if current_positions is None or len(current_positions) == 0:
+			if clear or current_positions is None or len(current_positions) == 0:
 				self.blocks[col] = blocks_poses
 			else:
 				self.blocks[col] = self.update_positions(current_positions, blocks_poses)
@@ -155,7 +155,10 @@ class PickNPlace():
 
 		new_data_indices = np.argwhere(hits == 0)
 
-		new_data_to_append = new_data[new_data_indices]
+		new_data_to_append = new_data[new_data_indices].squeeze()
+
+		print(new_data_to_append.shape)
+		print(new_data_to_append)
 
 		if new_data_to_append.size > 0:
 			return np.concatenate([data, np.atleast_2d(new_data_to_append)], axis=0)
@@ -167,7 +170,7 @@ class PickNPlace():
 		self.planner.go_to_nearest_block(colors)
 		self.wait_for_motion()
 
-		# self.update_block_map(self.possible_colors)
+		self.update_block_map(self.possible_colors, clear=True)
 
 		# TODO: Pick up the block
 		# TODO: Get the pose of the block in the base link frame!
